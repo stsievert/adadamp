@@ -1,5 +1,6 @@
-from typing import Callable, Union
+from typing import Callable, Union, Dict, Any, Tuple
 from pprint import pprint
+from copy import copy
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -9,7 +10,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 
-class BaseDamper(torch.optim.Optimizer):
+class BaseDamper(Optimizer):
     def __init__(
         self,
         model: nn.Module,
@@ -47,7 +48,7 @@ class BaseDamper(torch.optim.Optimizer):
             "loss": loss.__name__,
             "max_batch_size": max_batch_size,
         }
-        self.meta = {
+        self._meta: Dict[str, Any] = {
             "model_updates": 0,
             "num_examples": 0,
             "batch_loss": None,
@@ -56,34 +57,39 @@ class BaseDamper(torch.optim.Optimizer):
         }
 
         self.opt = opt
-        sampler = RandomSampler(dataset, replacement=True)
         self.dataset = dataset
         self.loss = loss
-        self.sampler = BatchSampler(
-            sampler, batch_size=initial_batch_size, drop_last=True
-        )
-        self.loader = DataLoader(dataset, batch_sampler=self.sampler, **kwargs,)
+        sampler = RandomSampler(dataset, replacement=True)
+        self.loader = DataLoader(dataset, sampler=sampler, drop_last=True, **kwargs,)
         self.model = model
         self.param_groups = self.opt.param_groups
         self.device = torch.device(device)
 
     def step(self, **kwargs):
         damping = self.damping()
-        self.sampler.batch_size = int(self.params["initial_batch_size"] * damping)
+        self.loader.batch_sampler.batch_size = int(
+            self.params["initial_batch_size"] * int(damping)
+        )
 
         # Is the batch size too large? If so, decay the learning rate
-        current_bs = self.sampler.batch_size
+        current_bs = self.loader.batch_sampler.batch_size
         max_bs = self.params["max_batch_size"]
         if max_bs is not None and current_bs >= max_bs:
-            self._set_lr(self.opt, factor=max_bs / current_bs)
+            self._set_lr(factor=max_bs / current_bs)
             self.sampler.batch_size = max_bs
 
         loss, num_examples = self._step(**kwargs)
 
-        self.meta["model_updates"] += 1
-        self.meta["num_examples"] += num_examples
-        self.meta["batch_loss"] = loss
-        self.meta["damping"] = damping
+        self._meta["model_updates"] += 1
+        self._meta["damping"] = damping
+        self._meta["lr_"] = self._get_lr()
+        self._meta["num_examples"] += num_examples
+        self._meta["batch_loss"] = loss
+        self._meta["damping"] = damping
+        self._meta["batch_size"] = self.loader.batch_sampler.batch_size
+
+    def damping(self):
+        return 1
 
     def _step(self, **kwargs):
         data, target = next(iter(self.loader))
@@ -95,23 +101,31 @@ class BaseDamper(torch.optim.Optimizer):
         self.opt.step(**kwargs)
         return loss.item(), len(data)
 
-    def damping(self):
-        return 1
-
-    def _set_lr(self, opt, factor=1):
-        for group in opt.param_groups:
+    def _set_lr(self, factor=1):
+        for group in self.opt.param_groups:
             group["lr"] *= factor
-        return opt
+        return self.opt
+
+    def _get_lr(self):
+        lrs = [group["lr"] for group in self.opt.param_groups]
+        assert all(lr == lrs[0] for lr in lrs)
+        return lrs[0]
+
+    @property
+    def meta(self):
+        d = copy(self._meta)
+        d.update(self.params)
+        return d
 
 
 class AdaDamp(BaseDamper):
     def damping(self):
-        return 32
+        return 1
 
 
 class PadaDamp(BaseDamper):
     def damping(self):
-        return 32
+        return 1
 
 
 class GeoDamp(BaseDamper):
@@ -119,7 +133,9 @@ class GeoDamp(BaseDamper):
         return 1
 
 
-def train(model: nn.Module, opt: BaseDamper, print_freq: Union[int, float] = 4):
+def train(
+    model: nn.Module, opt: BaseDamper, print_freq: Union[int, float, None] = 4, epochs=1
+):
     """
     Function to train for at least one epoch.
 
@@ -129,7 +145,7 @@ def train(model: nn.Module, opt: BaseDamper, print_freq: Union[int, float] = 4):
         PyTorch model.
     opt : Union[AdaDamp, PadaDamp]
         Optimizer. Must be a subclass of BaseDamper
-    print_freq : int, default=4
+    print_freq : int, float, None, default=4
         Frequency to print. Prints approximately every ``1 / print_freq``
         fraction of the dataset; setting ``print_freq == 10`` will mean it
         prints 10 times per epoch.
@@ -145,13 +161,19 @@ def train(model: nn.Module, opt: BaseDamper, print_freq: Union[int, float] = 4):
             "Argument ``opt`` is not an instance of BaseDamper. "
             "(passing AdaDamp, PadaDamp or GeoDamp will resolve this issue)"
         )
-    print_eg = int(len(opt.dataset) / print_freq)
-    old_examples = 0
+    if print_freq is not None:
+        print_eg = int(len(opt.dataset) / print_freq)
+    start_examples = opt._meta["num_examples"]
+    old_examples = opt._meta["num_examples"]
     while True:
-        opt.step()
-        if opt.meta["num_examples"] >= len(opt.dataset):
+        if opt._meta["num_examples"] - start_examples >= len(opt.dataset):
+            d = opt._meta["num_examples"] - start_examples
             break
-        if opt.meta["num_examples"] >= old_examples + print_eg:
-            pprint(opt.meta)
-            old_examples = opt.meta["num_examples"]
-    return model
+        opt.step()
+        if (
+            print_freq is not None
+            and opt._meta["num_examples"] >= old_examples + print_eg
+        ):
+            pprint(opt._meta)
+            old_examples = opt._meta["num_examples"]
+    return model, opt
