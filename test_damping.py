@@ -1,9 +1,9 @@
-# modified from https://github.com/pytorch/examples/blob/master/mnist/main.py
-
 from __future__ import print_function
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
+import numpy as np
+import pytest
 from sklearn.datasets import make_classification
 import pandas as pd
 import torch
@@ -32,42 +32,132 @@ class Net(nn.Module):
         return output
 
 
-if __name__ == "__main__":
-    args = SimpleNamespace(
-        initial_batch_size=16,
-        epochs=14,
-        log_interval=10,
-        lr=1.0,
-        no_cuda=False,
-        seed=1,
-        test_batch_size=1000,
-    )
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
-    device = torch.device("cuda" if use_cuda else "cpu")
-    torch.manual_seed(args.seed)
-
+@pytest.fixture
+def dataset():
     X, y = make_classification(
-        n_features=20, n_samples=100, n_classes=10, n_informative=10
+        n_features=20, n_samples=128, n_classes=10, n_informative=10
     )
-    train_set = TensorDataset(
+    return TensorDataset(
         torch.from_numpy(X.astype("float32")), torch.from_numpy(y.astype("int64"))
     )
 
-    model = Net().to(device)
-    optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
-    opt = damping.AdaDamp(
-        model, train_set, optimizer, initial_batch_size=args.initial_batch_size
-    )
+
+@pytest.fixture
+def model():
+    return Net().to("cpu")
+
+
+def test_basics(model, dataset):
+    epochs = 14
+    optimizer = optim.Adadelta(model.parameters(), lr=1)
+    opt = damping.BaseDamper(model, dataset, optimizer, initial_batch_size=8)
 
     data: List[Dict[str, Any]] = []
-    for epoch in range(1, args.epochs + 1):
-        model, opt = damping.train(model, opt, print_freq=None)
-        data.append(opt.meta)
+    for epoch in range(1, epochs + 1):
+        model, opt, train_data = damping.train(model, opt, return_data=True)
+        data += train_data
 
     df = pd.DataFrame(data)
     assert (df.model_updates * df.batch_size == df.num_examples).all()
-    df["epochs"] = df.num_examples / df.len_dataset
-    assert df.epochs.max() <= args.epochs + 2
+    assert df.epochs.max() <= epochs + 2
     eg_per_epoch = df.num_examples.diff().iloc[1:]
     len_dataset = df.len_dataset.iloc[1:]
     assert all((eg_per_epoch - len_dataset) <= df.batch_size.iloc[1:])
+
+
+def test_geodamp(model, dataset):
+    _opt = optim.Adadelta(model.parameters(), lr=1)
+    opt = damping.GeoDamp(
+        model, dataset, _opt, initial_batch_size=1, geodelay=4, geofactor=2
+    )
+    data: List[Dict[str, Any]] = []
+    # Specifically let GeoDamp train for at least one epoch
+    for epoch in range(1, 16 + 1):
+        model, opt = damping.train(model, opt)
+        data.append(opt.meta)
+    df = pd.DataFrame(data)
+    # Check to make sure it's exactly one epoch
+    assert np.allclose(df.epochs, np.floor(df.epochs))
+    counts = df.damping.value_counts()
+    assert set(counts.index.astype(int)) == {1, 2, 4, 8}
+    assert np.allclose(counts.unique(), 4)
+
+
+def test_padadamp(model, dataset):
+    _opt = optim.Adadelta(model.parameters(), lr=1)
+    opt = damping.PadaDamp(model, dataset, _opt, rate=1, initial_batch_size=1)
+    data: List[Dict[str, Any]] = []
+    for epoch in range(1, 16 + 1):
+        model, opt, train_data = damping.train(model, opt, return_data=True)
+        data += train_data
+    df = pd.DataFrame(data)
+    assert (df.damping == df.model_updates + 1).all()
+
+
+def test_adadamp(model, dataset):
+    _opt = optim.Adadelta(model.parameters(), lr=1)
+    opt = damping.AdaDamp(model, dataset, _opt, initial_batch_size=1)
+    data: List[Dict[str, Any]] = []
+    initial_loss = opt.get_loss()
+    for epoch in [1, 2, 3]:
+        model, opt, train_data = damping.train(model, opt, return_data=True)
+        data += train_data
+    df = pd.DataFrame(data)
+
+    bs_hat = (1 / df._complete_loss).astype(int) + 1
+    bs_hat = bs_hat.values
+    bs = df.batch_size.values
+    assert (bs == bs_hat).all()
+
+
+def test_avg_loss(model, dataset):
+    """
+    Test that BaseDamper.get_loss returns mean loss regardless of how many
+    points are sampled.
+    """
+    _opt = optim.Adadelta(model.parameters(), lr=1)
+    opt = damping.BaseDamper(model, dataset, _opt)
+    for epoch in range(1, 16 + 1):
+        model, opt = damping.train(model, opt)
+    loss = [
+        {"loss": opt.get_loss(frac=frac), "frac": frac, "repeat": repeat}
+        for frac in np.linspace(0.5, 0.99, num=5)
+        for repeat in range(5)
+    ]
+    total_loss = opt.get_loss(frac=1)
+    df = pd.DataFrame(loss)
+    summary = df.pivot(index="frac", columns="repeat", values="loss")
+
+    abs_error = np.abs(df.loss - total_loss)
+    rel_error = abs_error / total_loss
+    assert rel_error.max() <= 0.125
+    assert np.percentile(rel_error, 50) <= 0.12
+    assert 1.5 <= total_loss <= 2.2
+    assert abs_error.max() <= 0.17
+
+
+def test_get_params(model, dataset):
+    _opt = optim.Adadelta(model.parameters(), lr=1)
+    opt = damping.BaseDamper(model, dataset, _opt)
+    params = opt.get_params()
+
+    opt2 = damping.BaseDamper(model, dataset, _opt, **params)
+    params2 = opt2.get_params()
+    assert params == params2
+    param_keys = {
+        "device_type",
+        "initial_batch_size",
+        "loss_name",
+        "max_batch_size",
+        "reduction",
+    }
+    meta_keys = {
+        "model_updates",
+        "num_examples",
+        "batch_loss",
+        "num_params",
+        "len_dataset",
+        "opt_params",
+        "epochs",
+    }
+    assert set(opt.meta.keys()) == param_keys.union(meta_keys)
