@@ -15,6 +15,7 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import TensorDataset
 
 import damping
+import experiment
 
 
 class Net(nn.Module):
@@ -54,7 +55,7 @@ def test_basics(model, dataset):
 
     data: List[Dict[str, Any]] = []
     for epoch in range(1, epochs + 1):
-        model, opt, train_data = damping.train(model, opt, return_data=True)
+        model, opt, train_data = experiment.train(model, opt, return_data=True)
         data += train_data
 
     df = pd.DataFrame(data)
@@ -73,7 +74,7 @@ def test_geodamp(model, dataset):
     data: List[Dict[str, Any]] = []
     # Specifically let GeoDamp train for at least one epoch
     for epoch in range(1, 16 + 1):
-        model, opt = damping.train(model, opt)
+        model, opt = experiment.train(model, opt)
         data.append(opt.meta)
     df = pd.DataFrame(data)
     # Check to make sure it's exactly one epoch
@@ -88,7 +89,7 @@ def test_padadamp(model, dataset):
     opt = damping.PadaDamp(model, dataset, _opt, rate=1, initial_batch_size=1)
     data: List[Dict[str, Any]] = []
     for epoch in range(1, 16 + 1):
-        model, opt, train_data = damping.train(model, opt, return_data=True)
+        model, opt, train_data = experiment.train(model, opt, return_data=True)
         data += train_data
     df = pd.DataFrame(data)
     assert (df.damping == df.model_updates + 1).all()
@@ -100,7 +101,7 @@ def test_adadamp(model, dataset):
     data: List[Dict[str, Any]] = []
     initial_loss = opt.get_loss()
     for epoch in [1, 2, 3]:
-        model, opt, train_data = damping.train(model, opt, return_data=True)
+        model, opt, train_data = experiment.train(model, opt, return_data=True)
         data += train_data
     df = pd.DataFrame(data)
 
@@ -118,7 +119,7 @@ def test_avg_loss(model, dataset):
     _opt = optim.Adadelta(model.parameters(), lr=1)
     opt = damping.BaseDamper(model, dataset, _opt)
     for epoch in range(1, 16 + 1):
-        model, opt = damping.train(model, opt)
+        model, opt = experiment.train(model, opt)
     loss = [
         {"loss": opt.get_loss(frac=frac), "frac": frac, "repeat": repeat}
         for frac in np.linspace(0.5, 0.99, num=5)
@@ -157,7 +158,15 @@ def test_get_params(model, dataset):
         "batch_loss",
         "num_params",
         "len_dataset",
-        "opt_params",
+        "opt_param_lr",
+        "opt_param_rho",
+        "opt_param_eps",
+        "opt_param_weight_decay",
+        "initial_batch_size",
+        "max_batch_size",
+        "reduction",
+        "device_type",
+        "loss_name",
         "epochs",
     }
     assert set(opt.meta.keys()) == param_keys.union(meta_keys)

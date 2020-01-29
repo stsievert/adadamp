@@ -1,6 +1,7 @@
-from typing import Callable, Union, Dict, Any, Tuple, Set
+from typing import Callable, Union, Dict, Any, Tuple, Set, List
 from pprint import pprint
 from copy import copy
+import itertools
 
 import numpy as np
 import torch
@@ -9,6 +10,12 @@ from torch.utils.data import BatchSampler, RandomSampler
 from torch.optim import Optimizer
 import torch.nn.functional as F
 import torch.nn as nn
+
+
+def breakpoint():
+    import pdb
+
+    pdb.set_trace()
 
 
 class BaseDamper(Optimizer):
@@ -63,7 +70,6 @@ class BaseDamper(Optimizer):
             "max_batch_size",
             "reduction",
         }
-        self.device = device
         self.initial_batch_size = initial_batch_size
         self.loss = loss
         self.max_batch_size = max_batch_size
@@ -76,9 +82,8 @@ class BaseDamper(Optimizer):
             "batch_loss": None,
             "num_params": sum([m.nelement() for m in model.parameters()]),
             "len_dataset": len(dataset),
-            "opt_params": opt.defaults,
         }
-
+        self._meta.update({f"opt_param_{k}": v for k, v in opt.defaults.items()})
         self.opt = opt
         self.dataset = dataset
         self.loss = loss
@@ -89,9 +94,7 @@ class BaseDamper(Optimizer):
 
     def step(self, **kwargs):
         damping = self.damping()
-        self.loader.batch_sampler.batch_size = int(
-            self.initial_batch_size * int(damping)
-        )
+        self.loader.batch_sampler.batch_size = int(damping)
 
         # Is the batch size too large? If so, decay the learning rate
         current_bs = self.loader.batch_sampler.batch_size
@@ -111,7 +114,17 @@ class BaseDamper(Optimizer):
         self._meta["batch_size"] = self.loader.batch_sampler.batch_size
 
     def damping(self):
-        return 1
+        """
+        Damp the noise in the gradient approximation.
+
+        Notes
+        -----
+        - Should make use of self.initial_batch_size
+        - This is the main class for subclasses to overwrite. By default, it
+          wraps an optimizer with a static self.initial_batch_size
+
+        """
+        return self.initial_batch_size
 
     def _step(self, **kwargs):
         data, target = next(iter(self.loader))
@@ -222,7 +235,8 @@ class PadaDamp(BaseDamper):
 
     def damping(self):
         k = self.meta["model_updates"]
-        return self.initial_batch_size + _ceil(self.rate * k)
+        bs = self.initial_batch_size + _ceil(self.rate * k)
+        return bs
 
 
 class GeoDamp(BaseDamper):
@@ -233,59 +247,8 @@ class GeoDamp(BaseDamper):
 
     def damping(self):
         epochs = self.meta["num_examples"] / self.meta["len_dataset"]
-        return self.geofactor ** ((epochs) // self.geodelay)
-
-
-def train(
-    model: nn.Module,
-    opt: BaseDamper,
-    verbose: Union[int, bool, None] = None,
-    epochs=1,
-    return_data: bool = False,
-):
-    """
-    Function to train for at least one epoch.
-
-    Arguments
-    ---------
-    model : nn.Module
-        PyTorch model.
-    opt : Union[AdaDamp, PadaDamp]
-        Optimizer. Must be a subclass of BaseDamper
-    verbose : int, float, None, default=None
-        Controls printing. Higher values print more frequently, specifically
-        approximately every ``1 / verbose`` fraction of the dataset;
-        setting ``verbose == 10`` will mean it prints 10 times per epoch.
-
-    Returns
-    -------
-    model : nn.Module
-        The update model.
-
-    """
-    if not isinstance(opt, BaseDamper):
-        raise ValueError(
-            "Argument ``opt`` is not an instance of BaseDamper. "
-            "(passing AdaDamp, PadaDamp or GeoDamp will resolve this issue)"
-        )
-    if verbose is not None:
-        print_eg = int(len(opt.dataset) / verbose)
-    start_examples = opt._meta["num_examples"]
-    old_examples = opt._meta["num_examples"]
-    data = []
-    while True:
-        if opt._meta["num_examples"] - start_examples >= len(opt.dataset):
-            d = opt._meta["num_examples"] - start_examples
-            break
-        opt.step()
-        if return_data:
-            data.append(opt.meta)
-        if verbose is not None and opt._meta["num_examples"] >= old_examples + print_eg:
-            pprint(opt._meta)
-            old_examples = opt._meta["num_examples"]
-    if return_data:
-        return model, opt, data
-    return model, opt
+        factor = self.geofactor ** (epochs // self.geodelay)
+        return self.initial_batch_size * factor
 
 
 def _ceil(x):
