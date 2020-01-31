@@ -240,14 +240,14 @@ class PadaDamp(BaseDamper):
 
 
 class GeoDamp(BaseDamper):
-    def __init__(self, *args, geodelay=5, geofactor=2, **kwargs):
-        self.geodelay = geodelay
-        self.geofactor = geofactor
+    def __init__(self, *args, dampingdelay=5, dampingfactor=2, **kwargs):
+        self.dampingdelay = dampingdelay
+        self.dampingfactor = dampingfactor
         super().__init__(*args, **kwargs)
 
     def damping(self):
         epochs = self.meta["num_examples"] / self.meta["len_dataset"]
-        factor = self.geofactor ** (epochs // self.geodelay)
+        factor = self.dampingfactor ** (epochs // self.dampingdelay)
         return self.initial_batch_size * factor
 
 
