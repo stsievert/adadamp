@@ -14,7 +14,10 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import TensorDataset
 
-import damping
+#  import damping
+import adadamp
+import sys
+sys.path.append("../../..")
 import experiment
 
 

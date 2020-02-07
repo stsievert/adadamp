@@ -1,7 +1,6 @@
 from os.path import exists
 
 from setuptools import setup, find_packages
-import versioneer
 
 #  install_requires = [
 #  "torch >= 0.14.0",
