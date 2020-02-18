@@ -135,15 +135,39 @@ class BaseDamper(Optimizer):
         """
         return self.initial_batch_size
 
-    def _step(self, **kwargs):
-        start = time()
+    def _get_batch(self, batch_size=None):
         try:
             data, target = next(self._data_iter)
         except StopIteration:
-            # self.loader.batch_sampler.batch_size < 0?
             self._data_iter = iter(self.loader)
+            if batch_size is not None:
+                original_bs = copy(self.loader.batch_sampler.batch_size)
+                self.loader.batch_sampler.batch_size = batch_size
             data, target = next(self._data_iter)
         assert self.loader.batch_sampler.batch_size > 0
+        if batch_size is not None:
+            self.loader.batch_sampler.batch_size = original_bs
+        return data, target
+
+    def _step(self, **kwargs):
+        start = time()
+
+        bs = copy(self.loader.batch_sampler.batch_size)
+        if bs <= self._meta["len_dataset"]:
+            data, target = self._get_batch()
+            self._sizes = {"data": data.size(), "target": target.size()}
+        else:
+            data, target = self._get_batch(batch_size=self._meta["len_dataset"])
+            while True:
+                d, t = self._get_batch(
+                    batch_size=min(bs // 10, self._meta["len_dataset"])
+                )
+                data = torch.cat((data, d))  # , out=data)
+                target = torch.cat((target, t))  # , out=target)
+                if len(data) >= bs:
+                    break
+            bs2 = copy(self.loader.batch_sampler.batch_size)
+            assert bs == bs2
 
         data, target = data.to(self.device), target.to(self.device)
         self.opt.zero_grad()
@@ -299,6 +323,18 @@ class CntsDampLR(BaseDamper):
         k = self._meta["model_updates"]
         bs = np.round(self.initial_batch_size + 1 + self.dampingfactor * (k + 1))
         return bs
+
+
+class GradientDescent(BaseDamper):
+    def __init__(self, *args, dampingfactor=0.02, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._meta["damper"] = "gd"
+        sampler = SequentialSampler(self.dataset)
+        self.loader = DataLoader(self.dataset, sampler=sampler)
+        self._data_iter = iter(self.loader)
+
+    def damping(self):
+        return self._meta["len_dataset"]
 
 
 def _ceil(x):
