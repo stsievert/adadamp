@@ -8,4 +8,5 @@ from .damping import (
     GeoDampLR,
     CntsDampLR,
     GradientDescent,
+    ConvergenceError,
 )

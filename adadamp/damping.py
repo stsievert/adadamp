@@ -111,6 +111,8 @@ class BaseDamper(Optimizer):
             self.loader.batch_sampler.batch_size = max_bs
 
         batch_loss, num_examples = self._step(**kwargs)
+        if batch_loss >= 1e6:
+            raise ConvergenceError(f"The model is diverging; batch_loss={batch_loss}")
 
         self._meta["model_updates"] += 1
         self._meta["time"] = time()
@@ -233,19 +235,27 @@ class BaseDamper(Optimizer):
 
 
 class AdaDamp(BaseDamper):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, approx_loss=False, **kwargs):
+        self.approx_loss = approx_loss
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "adadamp"
 
     def damping(self):
-        loss = self.get_loss()
+        if not self.approx_loss:
+            loss = self.get_loss()
+        else:
+            loss = self._meta["batch_loss"]
+            if loss is None:
+                loss = self.get_loss(frac=0.1)
+            loss *= 0.95
+
         if self._meta["model_updates"] == 0:
             self._meta["_initial_loss"] = loss
         self._meta["_complete_loss"] = loss
         if np.isnan(loss):
             return 1
         initial_loss = self._meta["_initial_loss"]
-        if self._meta["best_train_loss"] is not None:
+        if self._meta.get("best_train_loss", None) is not None:
             initial_loss -= self._meta["best_train_loss"]
             loss -= self._meta["best_train_loss"]
         bs = _ceil(self.initial_batch_size * initial_loss / loss)
@@ -253,14 +263,14 @@ class AdaDamp(BaseDamper):
 
 
 class PadaDamp(BaseDamper):
-    def __init__(self, *args, rate=None, **kwargs):
+    def __init__(self, *args, batch_growth_rate=None, **kwargs):
         """
         Parameters
         ----------
         args : list
             Passed to BaseDamper
 
-        rate : float
+        batch_growth_rate : float
             The rate to increase the damping by. That is, set the batch size to be
 
             .. math::
@@ -280,13 +290,13 @@ class PadaDamp(BaseDamper):
         for u model updates.
 
         """
-        self.rate = rate
+        self.batch_growth_rate = batch_growth_rate
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "padadamp"
 
     def damping(self):
         k = self.meta["model_updates"]
-        bs = self.initial_batch_size + _ceil(self.rate * k)
+        bs = self.initial_batch_size + _ceil(self.batch_growth_rate * k)
         return bs
 
 
@@ -339,3 +349,7 @@ class GradientDescent(BaseDamper):
 
 def _ceil(x):
     return int(x) + 1
+
+
+class ConvergenceError(Exception):
+    pass
