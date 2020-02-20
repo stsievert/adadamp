@@ -112,7 +112,7 @@ class BaseDamper(Optimizer):
 
         batch_loss, num_examples = self._step(**kwargs)
         if batch_loss >= 1e6:
-            raise ConvergenceError(f"The model is diverging; batch_loss={batch_loss}")
+            raise ConvergenceError(f"The model is diverging; batch_loss={batch_loss:0.2e}")
 
         self._meta["model_updates"] += 1
         self._meta["time"] = time()
@@ -216,7 +216,9 @@ class BaseDamper(Optimizer):
         kwargs = (
             {"num_workers": 1, "pin_memory": True} if torch.cuda.is_available() else {}
         )
-        loader = torch.utils.data.DataLoader(dataset, batch_size=1000, **kwargs)
+        loader = torch.utils.data.DataLoader(
+            dataset, batch_size=1000, shuffle=True, **kwargs
+        )
 
         total_loss = 0
         _num_eg = 0
@@ -245,8 +247,10 @@ class AdaDamp(BaseDamper):
             loss = self.get_loss()
         else:
             loss = self._meta["batch_loss"]
-            if loss is None:
+            if loss is None or self._meta["batch_size"] <= 25:
                 loss = self.get_loss(frac=0.1)
+            if loss >= 1e6:
+                raise ConvergenceError(f"loss with approx_loss too high ({loss:0.2e})")
             loss *= 0.95
 
         if self._meta["model_updates"] == 0:
@@ -258,8 +262,7 @@ class AdaDamp(BaseDamper):
         if self._meta.get("best_train_loss", None) is not None:
             initial_loss -= self._meta["best_train_loss"]
             loss -= self._meta["best_train_loss"]
-        bs = _ceil(self.initial_batch_size * initial_loss / loss)
-        return bs
+        return _ceil(self.initial_batch_size * initial_loss / loss)
 
 
 class PadaDamp(BaseDamper):
