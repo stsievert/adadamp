@@ -21,7 +21,7 @@ def _get_version() -> str:
     return well_done
 
 
-install_requires = []
+install_requires = ["numpy", "pandas"]
 
 
 setup(

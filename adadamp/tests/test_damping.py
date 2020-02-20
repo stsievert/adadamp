@@ -14,11 +14,8 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import TensorDataset
 
-#  import damping
-import adadamp
-import sys
-sys.path.append("../../..")
-import experiment
+from adadamp import BaseDamper, GeoDamp, AdaDamp, PadaDamp
+import adadamp.experiment as experiment
 
 
 class Net(nn.Module):
@@ -54,11 +51,11 @@ def model():
 def test_basics(model, dataset):
     epochs = 14
     optimizer = optim.Adadelta(model.parameters(), lr=1)
-    opt = damping.BaseDamper(model, dataset, optimizer, initial_batch_size=8)
+    opt = BaseDamper(model, dataset, optimizer, initial_batch_size=8)
 
     data: List[Dict[str, Any]] = []
     for epoch in range(1, epochs + 1):
-        model, opt, train_data = experiment.train(model, opt, return_data=True)
+        model, opt, meta, train_data = experiment.train(model, opt)
         data += train_data
 
     df = pd.DataFrame(data)
@@ -71,13 +68,13 @@ def test_basics(model, dataset):
 
 def test_geodamp(model, dataset):
     _opt = optim.Adadelta(model.parameters(), lr=1)
-    opt = damping.GeoDamp(
-        model, dataset, _opt, initial_batch_size=1, geodelay=4, geofactor=2
+    opt = GeoDamp(
+        model, dataset, _opt, initial_batch_size=1, dampingdelay=4, dampingfactor=2
     )
     data: List[Dict[str, Any]] = []
     # Specifically let GeoDamp train for at least one epoch
     for epoch in range(1, 16 + 1):
-        model, opt = experiment.train(model, opt)
+        model, opt, meta, _ = experiment.train(model, opt)
         data.append(opt.meta)
     df = pd.DataFrame(data)
     # Check to make sure it's exactly one epoch
@@ -89,46 +86,47 @@ def test_geodamp(model, dataset):
 
 def test_padadamp(model, dataset):
     _opt = optim.Adadelta(model.parameters(), lr=1)
-    opt = damping.PadaDamp(model, dataset, _opt, rate=1, initial_batch_size=1)
+    opt = PadaDamp(model, dataset, _opt, batch_growth_rate=1, initial_batch_size=1)
     data: List[Dict[str, Any]] = []
     for epoch in range(1, 16 + 1):
-        model, opt, train_data = experiment.train(model, opt, return_data=True)
+        model, opt, meta, train_data = experiment.train(model, opt)
         data += train_data
     df = pd.DataFrame(data)
     assert (df.damping == df.model_updates + 1).all()
 
 
 def test_adadamp(model, dataset):
-    _opt = optim.Adadelta(model.parameters(), lr=1)
-    opt = damping.AdaDamp(model, dataset, _opt, initial_batch_size=1)
+    init_bs = 8
+    _opt = optim.SGD(model.parameters(), lr=0.500)
+    opt = AdaDamp(model, dataset, _opt, initial_batch_size=init_bs)
     data: List[Dict[str, Any]] = []
-    initial_loss = opt.get_loss()
-    for epoch in [1, 2, 3]:
-        model, opt, train_data = experiment.train(model, opt, return_data=True)
+    initial_loss = opt._get_loss()
+    for epoch in range(5):
+        model, opt, meta, train_data = experiment.train(model, opt)
         data += train_data
     df = pd.DataFrame(data)
 
-    bs_hat = (1 / df._complete_loss).astype(int) + 1
-    bs_hat = bs_hat.values
+    bs_hat = init_bs * df.loc[0, "_complete_loss"] / df._complete_loss
+    bs_hat = bs_hat.values.astype(int) + 1
     bs = df.batch_size.values
     assert (bs == bs_hat).all()
 
 
 def test_avg_loss(model, dataset):
     """
-    Test that BaseDamper.get_loss returns mean loss regardless of how many
+    Test that BaseDamper._get_loss returns mean loss regardless of how many
     points are sampled.
     """
     _opt = optim.Adadelta(model.parameters(), lr=1)
-    opt = damping.BaseDamper(model, dataset, _opt)
+    opt = BaseDamper(model, dataset, _opt)
     for epoch in range(1, 16 + 1):
-        model, opt = experiment.train(model, opt)
+        model, opt, meta, _ = experiment.train(model, opt)
     loss = [
-        {"loss": opt.get_loss(frac=frac), "frac": frac, "repeat": repeat}
+        {"loss": opt._get_loss(frac=frac), "frac": frac, "repeat": repeat}
         for frac in np.linspace(0.5, 0.99, num=5)
         for repeat in range(5)
     ]
-    total_loss = opt.get_loss(frac=1)
+    total_loss = opt._get_loss(frac=1)
     df = pd.DataFrame(loss)
     summary = df.pivot(index="frac", columns="repeat", values="loss")
 
@@ -142,10 +140,10 @@ def test_avg_loss(model, dataset):
 
 def test_get_params(model, dataset):
     _opt = optim.Adadelta(model.parameters(), lr=1)
-    opt = damping.BaseDamper(model, dataset, _opt)
+    opt = BaseDamper(model, dataset, _opt)
     params = opt.get_params()
 
-    opt2 = damping.BaseDamper(model, dataset, _opt, **params)
+    opt2 = BaseDamper(model, dataset, _opt, **params)
     params2 = opt2.get_params()
     assert params == params2
     param_keys = {
@@ -153,7 +151,6 @@ def test_get_params(model, dataset):
         "initial_batch_size",
         "loss_name",
         "max_batch_size",
-        "reduction",
     }
     meta_keys = {
         "model_updates",
@@ -167,9 +164,9 @@ def test_get_params(model, dataset):
         "opt_param_weight_decay",
         "initial_batch_size",
         "max_batch_size",
-        "reduction",
         "device_type",
         "loss_name",
         "epochs",
+        "damper",
     }
     assert set(opt.meta.keys()) == param_keys.union(meta_keys)

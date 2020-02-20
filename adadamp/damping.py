@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Any, Tuple, Set, List, Optional
+from typing import Callable, Dict, Any, Tuple, Set, List, Optional, Union
 from pprint import pprint
 from copy import copy
 import itertools
@@ -12,6 +12,8 @@ from torch.optim import Optimizer
 import torch.nn.functional as F
 import torch.nn as nn
 
+Number = Union[float, int]
+
 
 def breakpoint():
     import pdb
@@ -19,7 +21,41 @@ def breakpoint():
     pdb.set_trace()
 
 
-class BaseDamper(Optimizer):
+class BaseDamper:
+    """Damp the noise in the gradient estimate.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The model to train
+    dataset : torch.Dataset
+        Dataset to use for training
+    opt : torch.optim.Optimizer
+        The optimizer to use
+    loss : callable (function), default=torch.nn.F.nll_loss
+        The loss function to use. Must support the reduction keyword. Signature:
+        ``loss(output, target, reduction="sum")``.
+    initial_batch_size : int, default=1
+        Initial batch size
+    device : str, default="cpu"
+        The device to use.
+    max_batch_size : int, float, None, default=None
+        The maximum batch size. If the batch size is larger than this
+        value, the learning rate is decayed by an appropriate amount.
+        If None, will automatically be set to be the size of the
+        dataset. Setting to NaN will result in no maximum batch size.
+    kwargs : dict
+        Arguments to pass to the underlying torch.DataLoader
+
+
+    Notes
+    -----
+    By default, this class does not perform any damping (but it's children
+    do). If a function needs an instance of BaseDamper, this class can wrap
+    any optimizer.
+
+    """
+
     def __init__(
         self,
         model: nn.Module,
@@ -28,43 +64,10 @@ class BaseDamper(Optimizer):
         loss: Callable = F.nll_loss,
         initial_batch_size: int = 1,
         device: str = "cpu",
-        max_batch_size: Optional[int] = None,
+        max_batch_size: Optional[Number] = None,
         best_train_loss: Optional[float] = None,
         **kwargs,
     ):
-        """
-        Damp the noise in the gradient estimate.
-
-        Arguments
-        ---------
-        model : nn.Module
-            The model to train
-        dataset : torch.Dataset
-            Dataset to use for training
-        opt : torch.optim.Optimizer
-            The optimizer to use
-        loss : callable (function), default=torch.nn.F.nll_loss
-            The loss function to use. Must support the reduction keyword. Signature:
-
-                loss(output, target, reduction="sum")
-
-        initial_batch_size : int, default=1
-            Initial batch size
-        device : str, default="cpu"
-            The device to use.
-        max_batch_size : int, None, default=None
-            The maximum batch size. If the batch size is larger than this
-            value, the learning rate is decayed by an appropriate amount. If None, will automatically be set to be the size of the dataset.
-        kwargs : dict
-            Arguments to pass to the underlying torch.DataLoader
-
-        Notes
-        -----
-        By default, this class does not perform any damping (but it's children
-        do). If a function needs an instance of BaseDamper, this class can wrap
-        any optimizer.
-
-        """
         self._params: Set[str] = {
             "device_type",
             "initial_batch_size",
@@ -98,6 +101,14 @@ class BaseDamper(Optimizer):
         self._initial_lr = self._get_lr()
 
     def step(self, **kwargs):
+        """Perform an optimization step
+
+        Parameters
+        ----------
+        kwargs : Dict[str, Any], optional
+            Arguments to pass to PyTorch's ``opt.step``
+            (e.g., :class:`torch.optim.AdaGrad`)
+        """
         start = time()
         damping = self.damping()
         self._meta["damping_time"] = time() - start
@@ -124,15 +135,22 @@ class BaseDamper(Optimizer):
         self._meta["damping"] = damping
         self._meta["batch_size"] = self.loader.batch_sampler.batch_size
 
-    def damping(self):
-        """
-        Damp the noise in the gradient approximation.
+    def damping(self) -> int:
+        """Determines how strongly noise in stochastic gradient
+        estimate is damped.
 
         Notes
         -----
-        - Should make use of self.initial_batch_size
-        - This is the main class for subclasses to overwrite. By default, it
-          wraps an optimizer with a static self.initial_batch_size
+        This is the main function for subclasses to overwrite. By
+        default, this wraps an optimizer with a static
+        ``self.initial_batch_size``. Here's a brief example usage:
+
+            >>> dataset = datasets.MNIST(...)
+            >>> model = Net()
+            >>> opt = optim.AdaGrad(model.parameters())
+            >>> opt = BaseDamper(model, dataset, opt, initial_batch_size=32)
+            >>> opt.damping()
+            32
 
         """
         return self.initial_batch_size
@@ -192,11 +210,15 @@ class BaseDamper(Optimizer):
         return lrs[0]
 
     def get_params(self):
+        """Get parameters for this optimzer."""
         params = {k: v for k, v in self.__dict__.items() if k in self._params}
         return params
 
     @property
     def meta(self):
+        """Get meta information about this optimizer, including number
+        of model updates and number of examples processed.
+        """
         d = copy(self._meta)
         d.update(self.get_params())
         d["device_type"] = self.device.type
@@ -204,7 +226,7 @@ class BaseDamper(Optimizer):
         d["epochs"] = d["num_examples"] / d["len_dataset"]
         return d
 
-    def get_loss(
+    def _get_loss(
         self, dataset: Optional[Dataset] = None, frac: Optional[float] = None,
     ):
         if dataset is None:
@@ -242,9 +264,21 @@ class AdaDamp(BaseDamper):
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "adadamp"
 
-    def damping(self):
+    def damping(self) -> int:
+        r"""Adaptively damp the noise depending on the current loss with
+
+        .. math::
+
+           B_k = \left\lceil B_0\frac{F(x_0) - F^\star}{F(x_k) - F^\star}\right\rceil
+
+        .. warning::
+
+           This batch size is expensive to compute. It requires evaluating the entire loss function :math:`F`. Use of
+           :class:`~PadaDamp` is recommended.
+
+        """
         if not self.approx_loss:
-            loss = self.get_loss()
+            loss = self._get_loss()
         else:
             loss = self._meta["batch_loss"]
             if loss is None or self._meta["batch_size"] <= 25:
@@ -266,38 +300,55 @@ class AdaDamp(BaseDamper):
 
 
 class PadaDamp(BaseDamper):
-    def __init__(self, *args, batch_growth_rate=None, **kwargs):
-        """
-        Parameters
-        ----------
-        args : list
-            Passed to BaseDamper
-
-        batch_growth_rate : float
-            The rate to increase the damping by. That is, set the batch size to be
-
-            .. math::
-
-                B_0 + ceil(rate * k)
-
-            where k is the number of model updates.
-
-        Notes
-        -----
-        The number of epochs is
+    r"""
+    Parameters
+    ----------
+    args : list
+        Passed to BaseDamper
+    batch_growth_rate : float
+        The rate to increase the damping by. That is, set the batch size
+        to be
 
         .. math::
 
-            uB_0 + \sum_{i=1}^u ceil(rate * k)
+           B_k = B_0 \lceil \textrm{rate}\cdot k \rceil
 
-        for u model updates.
+        after the model is updated :math:`k` times.
+    kwargs : dict
+        Passed to BaseDamper
 
-        """
+    Notes
+    -----
+    The number of epochs is
+
+    .. math::
+
+        uB_0 + \sum_{i=1}^u \lceil \textrm{rate} \cdot k\rceil
+
+    for :math:`u` model updates.
+
+    .. note::
+
+       This class is only appropriate for non-convex and convex loss
+       functions. It is not appropriate for strongly convex loss or PL
+       functions.
+
+    """
+
+    def __init__(self, *args, batch_growth_rate=None, **kwargs):
         self.batch_growth_rate = batch_growth_rate
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "padadamp"
 
-    def damping(self):
+    def damping(self) -> int:
+        r"""Approximate AdaDamp with less computation via
+
+        .. math::
+
+            B_k = B_0 + \lceil \textrm{rate}\cdot k\rceil
+
+        where k is the number of model updates.
+        """
         k = self.meta["model_updates"]
         bs = self.initial_batch_size + _ceil(self.batch_growth_rate * k)
         return bs
@@ -310,7 +361,10 @@ class GeoDamp(BaseDamper):
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "geodamp"
 
-    def damping(self):
+    def damping(self) -> int:
+        """Set the batch size to increase by ``dampingfactor`` every
+        ``dampingdelay`` epochs.
+        """
         assert self.dampingfactor >= 1
         epochs = self.meta["num_examples"] / self.meta["len_dataset"]
         factor = self.dampingfactor ** (epochs // self.dampingdelay)
@@ -324,6 +378,12 @@ class GeoDampLR(GeoDamp):
         self._last_factor = None
         self.max_batch_size = self.initial_batch_size
 
+    def damping(self) -> int:
+        """Set the learning rate to decrease by ``dampingfactor`` every
+        ``dampingdelay`` epochs.
+        """
+        super().damping()
+
 
 class CntsDampLR(BaseDamper):
     def __init__(self, *args, dampingfactor=0.02, **kwargs):
@@ -332,21 +392,27 @@ class CntsDampLR(BaseDamper):
         self.dampingfactor = dampingfactor
         self.max_batch_size = self.initial_batch_size
 
-    def damping(self):
+    def damping(self) -> int:
+        """Decay the learning rate by :math:`1/k` after :math:`k` model updates.
+        """
         k = self._meta["model_updates"]
         bs = np.round(self.initial_batch_size + 1 + self.dampingfactor * (k + 1))
         return bs
 
 
 class GradientDescent(BaseDamper):
-    def __init__(self, *args, dampingfactor=0.02, **kwargs):
+    """This class performs full gradient descent.
+    """
+
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "gd"
         sampler = SequentialSampler(self.dataset)
         self.loader = DataLoader(self.dataset, sampler=sampler)
         self._data_iter = iter(self.loader)
 
-    def damping(self):
+    def damping(self) -> int:
+        """ """
         return self._meta["len_dataset"]
 
 
