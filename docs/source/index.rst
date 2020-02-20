@@ -18,6 +18,9 @@ estimate, but can't compute as many model updates for the same computation budge
 This package provides a method to balance these two extremes. It has
 mathematical foundations and the results are confirmed in experiments.
 
+Balancing these two extremes means that **training will finished more
+quickly**. More detail can be found in the `Experiments` section.
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents:

@@ -29,7 +29,7 @@ install_requires = ["numpy", "pandas"]
 setup(
     name="adadamp",
     version=_get_version(),
-    #  url=
+    url="https://stsievert.com/adadamp",
     maintainer="Scott Sievert",
     maintainer_email="dev@stsievert.com",
     install_requires=install_requires,
