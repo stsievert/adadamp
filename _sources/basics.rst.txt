@@ -24,13 +24,15 @@ There are no prerequisites for this method.
    $ git clone https://github.com/stsievert/adadamp
    $ cd adadamp
    $ conda env create -f adadamp.yaml
+   $ conda activate adadamp
    $ python setup.py install
 
 Basic Usage
 -----------
 
 Let's make small modifications to `PyTorch's MNIST example`_. This example
-usage will be trimmed for brevity; the complete script can be found at the end.
+usage will be trimmed for brevity. The complete script can be found at
+https://github.com/stsievert/adadamp/blob/master/test_mnist.py.
 
 First, let's start by
 
@@ -43,7 +45,7 @@ First, let's start by
        def __init__(self):
            super(Net, self).__init__()
            self.conv1 = nn.Conv2d(1, 32, 3, 1)
-           # etc; unchanged from example
+           # etc; nearly unchanged from example
 
    model = Net()
 
@@ -95,6 +97,10 @@ This will result in quicker training. Let's do that:
        train(model=model, opt=optimizer)
        data = test(model=model, loss=loss, dataset=test_set)
        print(data)
+
+These ``train`` and ``test`` functions are small modifications. The
+:class:`~adadamp.PadaDamp` instance conforms to the `torch.optim.Optimizer`
+API, and can be used as a drop-in replacement (besides initialization).
 
 .. _PyTorch's MNIST example: https://github.com/pytorch/examples/blob/e9e76722dad4f4569651a8d67ca1d10607db58f9/mnist/main.py
 
