@@ -1,4 +1,4 @@
-__version__ = "0.1.0rc"
+__version__ = "0.1.0"
 
 from .damping import (
     BaseDamper,

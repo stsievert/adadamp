@@ -20,6 +20,8 @@ def _get_version() -> str:
     well_done = medium[1:-1]
     return well_done
 
+with open("README.md", "r") as fh:
+    long_description = fh.read()
 
 install_requires = ["numpy", "pandas"]
 
@@ -32,6 +34,7 @@ setup(
     maintainer_email="dev@stsievert.com",
     install_requires=install_requires,
     description="Batch size estimation for machine learning training",
-    long_description=(open("README.rst").read() if exists("README.rst") else ""),
+    long_description=long_description,
+    long_description_content_type='text/markdown',
     packages=find_packages(exclude=["docs", "tests", "tests.*", "docs.*"]),
 )
