@@ -15,11 +15,11 @@ variable gradient estimates but can compute many model updates for a given
 computation budget. Large batch sizes will result in more precise gradient
 estimate, but can't compute as many model updates for the same computation budget.
 
-This package provides a method to balance these two extremes. It has
-mathematical foundations and the results are confirmed in experiments.
-
+This package provides a method founded in math to balance these two extremes.
 Balancing these two extremes means that **training will finished more
-quickly**. More detail can be found in the `Experiments` section.
+quickly**. More detail can be found in the `Mathematical underpinning` and
+`Experiments` sections.
+
 
 .. toctree::
    :maxdepth: 2

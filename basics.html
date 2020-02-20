@@ -157,6 +157,7 @@
   <hr/>
 </div>
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+
            <div itemprop="articleBody">
             
   <div class="section" id="getting-started">
@@ -186,28 +187,34 @@ $ python setup.py install
 <div class="section" id="basic-usage">
 <h2>Basic Usage<a class="headerlink" href="#basic-usage" title="Permalink to this headline">¶</a></h2>
 <p>Let’s make small modifications to <a class="reference external" href="https://github.com/pytorch/examples/blob/e9e76722dad4f4569651a8d67ca1d10607db58f9/mnist/main.py">PyTorch’s MNIST example</a>. This example
-usage will be trimmed for brevity. The complete script can be found at
-<a class="reference external" href="https://github.com/stsievert/adadamp/blob/master/test_mnist.py">https://github.com/stsievert/adadamp/blob/master/test_mnist.py</a>.</p>
-<p>First, let’s start by</p>
+usage will be trimmed for brevity. The complete script can be found on GitHub
+at <a class="reference external" href="https://github.com/stsievert/adadamp/blob/master/test_mnist.py">test_mnist.py</a>.</p>
+<p>First, let’s start by creating the model.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">torch</span>
 <span class="kn">import</span> <span class="nn">torch.nn</span> <span class="k">as</span> <span class="nn">nn</span>
+<span class="kn">from</span> <span class="nn">torchvision</span> <span class="kn">import</span> <span class="n">datasets</span>
 
 <span class="k">class</span> <span class="nc">Net</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="nb">super</span><span class="p">(</span><span class="n">Net</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">conv1</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Conv2d</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-        <span class="c1"># etc; nearly unchanged from example</span>
+        <span class="c1"># etc; unchanged from example</span>
+
+     <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="c1"># etc; unchanged from example</span>
+
 
 <span class="n">model</span> <span class="o">=</span> <span class="n">Net</span><span class="p">()</span>
 </pre></div>
 </div>
-<p>Now, let’s create our datasets:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">torchvision</span> <span class="kn">import</span> <span class="n">datasets</span>
-
-<span class="n">train_set</span> <span class="o">=</span> <span class="n">datasets</span><span class="o">.</span><span class="n">MNIST</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>  <span class="c1"># internals untouched</span>
+<p>This is a standard PyTorch model definition. Now, let’s create the dataset:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">train_set</span> <span class="o">=</span> <span class="n">datasets</span><span class="o">.</span><span class="n">MNIST</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>  <span class="c1"># internals untouched</span>
 <span class="n">test_set</span> <span class="o">=</span> <span class="n">datasets</span><span class="o">.</span><span class="n">MNIST</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>  <span class="c1"># internals untouched</span>
 </pre></div>
 </div>
+<p>Notice a <code class="xref py py-class docutils literal notranslate"><span class="pre">DataLoader</span></code> object is not created (as with
+PyTorch), only the dataset that’s passed to
+<code class="xref py py-class docutils literal notranslate"><span class="pre">DataLoader</span></code>.</p>
 <p>Now, let’s create the loss function to optimize, alongside the optimizer:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">torch.optim</span> <span class="k">as</span> <span class="nn">optim</span>
 <span class="kn">import</span> <span class="nn">torch.nn.functional</span> <span class="k">as</span> <span class="nn">F</span>
@@ -216,7 +223,11 @@ usage will be trimmed for brevity. The complete script can be found at
 <span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">nll_loss</span>
 </pre></div>
 </div>
-<p>Let’s use <a class="reference internal" href="api.html#adadamp.PadaDamp" title="adadamp.PadaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">PadaDamp</span></code></a>, which will grow the batch size.</p>
+<p>Again, the optimizer is a pretty standard definition. Use of SGD is recommended
+and backed by mathematics. Use of momentum and Nesterov acceleration is likely
+beneficial even though there’s no backing mathematics.</p>
+<p>Let’s use <a class="reference internal" href="api.html#adadamp.PadaDamp" title="adadamp.PadaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">PadaDamp</span></code></a>, which will grow the batch size and is an
+approximation to the firmly grounded but impractical <a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a>:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">adadamp</span> <span class="kn">import</span> <span class="n">PadaDamp</span>
 
 <span class="n">optimizer</span> <span class="o">=</span> <span class="n">PadaDamp</span><span class="p">(</span>
@@ -231,7 +242,11 @@ usage will be trimmed for brevity. The complete script can be found at
 <span class="p">)</span>
 </pre></div>
 </div>
-<p>This will result in quicker training. Let’s do that:</p>
+<p>This <code class="docutils literal notranslate"><span class="pre">optimizer</span></code> is a drop in replacement for any of PyTorch’s optimizers
+like <code class="xref py py-class docutils literal notranslate"><span class="pre">torch.optim.SGD</span></code> or <code class="xref py py-class docutils literal notranslate"><span class="pre">torch.optim.Adagrad</span></code>. This means that
+we can use it in our (custom) training functions by calling
+<code class="docutils literal notranslate"><span class="pre">optimizer.step()</span></code>.</p>
+<p>However, it might be easier to use the built-in train/test functions:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">adadamp.experiment</span> <span class="kn">import</span> <span class="n">train</span><span class="p">,</span> <span class="n">test</span>
 
 <span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">epochs</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
@@ -241,8 +256,9 @@ usage will be trimmed for brevity. The complete script can be found at
 </pre></div>
 </div>
 <p>These <code class="docutils literal notranslate"><span class="pre">train</span></code> and <code class="docutils literal notranslate"><span class="pre">test</span></code> functions are small modifications. The
-<a class="reference internal" href="api.html#adadamp.PadaDamp" title="adadamp.PadaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">PadaDamp</span></code></a> instance conforms to the <cite>torch.optim.Optimizer</cite>
-API, and can be used as a drop-in replacement (besides initialization).</p>
+<a class="reference internal" href="api.html#adadamp.PadaDamp" title="adadamp.PadaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">PadaDamp</span></code></a> instance conforms to the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">torch.optim.Optimizer</span></code> API, and can be used as a drop-in replacement
+after initialization.</p>
 </div>
 </div>
 
@@ -250,6 +266,10 @@ API, and can be used as a drop-in replacement (besides initialization).</p>
            </div>
            
           </div>
+      <a href="https://github.com/stsievert/adadamp">
+        <img style="position: absolute; top: 0; right: 0; border: 0;" src="https://github.blog/wp-content/uploads/2008/12/forkme_right_gray_6d6d6d.png?resize=149%2C149" alt="Fork me on GitHub">
+    </a>
+
           <footer>
   
     <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">

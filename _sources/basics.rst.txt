@@ -32,33 +32,41 @@ Basic Usage
 -----------
 
 Let's make small modifications to `PyTorch's MNIST example`_. This example
-usage will be trimmed for brevity. The complete script can be found at
-https://github.com/stsievert/adadamp/blob/master/test_mnist.py.
+usage will be trimmed for brevity. The complete script can be found on GitHub
+at `test_mnist.py`_.
 
-First, let's start by
+.. _test_mnist.py: https://github.com/stsievert/adadamp/blob/master/test_mnist.py
+
+First, let's start by creating the model.
 
 .. code:: python
 
    import torch
    import torch.nn as nn
+   from torchvision import datasets
 
    class Net(nn.Module):
        def __init__(self):
            super(Net, self).__init__()
            self.conv1 = nn.Conv2d(1, 32, 3, 1)
-           # etc; nearly unchanged from example
+           # etc; unchanged from example
+
+        def forward(self, x):
+           # etc; unchanged from example
+
 
    model = Net()
 
-
-Now, let's create our datasets:
+This is a standard PyTorch model definition. Now, let's create the dataset:
 
 .. code:: python
 
-   from torchvision import datasets
-
    train_set = datasets.MNIST(...)  # internals untouched
    test_set = datasets.MNIST(...)  # internals untouched
+
+Notice a :class:`~torch.utils.data.DataLoader` object is not created (as with
+PyTorch), only the dataset that's passed to
+:class:`~torch.utils.data.DataLoader`.
 
 Now, let's create the loss function to optimize, alongside the optimizer:
 
@@ -70,8 +78,12 @@ Now, let's create the loss function to optimize, alongside the optimizer:
    _optimizer = optim.SGD(model.parameters(), lr=args.lr)
    loss = F.nll_loss
 
+Again, the optimizer is a pretty standard definition. Use of SGD is recommended
+and backed by mathematics. Use of momentum and Nesterov acceleration is likely
+beneficial even though there's no backing mathematics.
 
-Let's use :class:`~adadamp.PadaDamp`, which will grow the batch size.
+Let's use :class:`~adadamp.PadaDamp`, which will grow the batch size and is an
+approximation to the firmly grounded but impractical :class:`~adadamp.AdaDamp`:
 
 .. code:: python
 
@@ -88,7 +100,12 @@ Let's use :class:`~adadamp.PadaDamp`, which will grow the batch size.
        max_batch_size=1024,
    )
 
-This will result in quicker training. Let's do that:
+This ``optimizer`` is a drop in replacement for any of PyTorch's optimizers
+like :class:`torch.optim.SGD` or :class:`torch.optim.Adagrad`. This means that
+we can use it in our (custom) training functions by calling
+``optimizer.step()``.
+
+However, it might be easier to use the built-in train/test functions:
 
 .. code:: python
 
@@ -100,8 +117,9 @@ This will result in quicker training. Let's do that:
        print(data)
 
 These ``train`` and ``test`` functions are small modifications. The
-:class:`~adadamp.PadaDamp` instance conforms to the `torch.optim.Optimizer`
-API, and can be used as a drop-in replacement (besides initialization).
+:class:`~adadamp.PadaDamp` instance conforms to the
+:class:`torch.optim.Optimizer` API, and can be used as a drop-in replacement
+after initialization.
 
 .. _PyTorch's MNIST example: https://github.com/pytorch/examples/blob/e9e76722dad4f4569651a8d67ca1d10607db58f9/mnist/main.py
 
