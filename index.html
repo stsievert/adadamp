@@ -34,9 +34,10 @@
   
   <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
   <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Getting Started" href="basics.html" /> 
+    <link rel="next" title="Getting Started" href="getting-started.html" /> 
 </head>
 
 <body class="wy-body-for-nav">
@@ -82,7 +83,8 @@
             
               <p class="caption"><span class="caption-text">Contents:</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="basics.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="basic-usage.html">Basic Usage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="math.html">Mathematical underpinnings</a></li>
 <li class="toctree-l1"><a class="reference internal" href="experiments.html">Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api.html">API</a></li>
@@ -162,17 +164,24 @@ computation budget. Large batch sizes will result in more precise gradient
 estimate, but can’t compute as many model updates for the same computation budget.</p>
 <p>This package provides a method founded in math to balance these two extremes.
 Balancing these two extremes means that <strong>training will finished more
-quickly</strong>. More detail can be found in the <cite>Mathematical underpinning</cite> and
-<cite>Experiments</cite> sections.</p>
+quickly</strong>. More detail can be found in the <a class="reference internal" href="math.html#sec-math"><span class="std std-ref">Mathematical underpinnings</span></a> and
+<a class="reference internal" href="experiments.html#sec-exps"><span class="std std-ref">Experiments</span></a> sections.</p>
 <div class="toctree-wrapper compound">
 <p class="caption"><span class="caption-text">Contents:</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="basics.html">Getting Started</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="basics.html#installation">Installation</a></li>
-<li class="toctree-l2"><a class="reference internal" href="basics.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting Started</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started.html#test">Test</a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="math.html">Mathematical underpinnings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="basic-usage.html">Basic Usage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="math.html">Mathematical underpinnings</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="math.html#background">Background</a></li>
+<li class="toctree-l2"><a class="reference internal" href="math.html#why-should-the-batch-size-grow">Why should the batch size grow?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="math.html#how-should-the-batch-size-grow">How should the batch size grow?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="math.html#convergence">Convergence</a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="experiments.html">Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api.html">API</a></li>
 </ul>
@@ -199,7 +208,7 @@ quickly</strong>. More detail can be found in the <cite>Mathematical underpinnin
   
     <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
       
-        <a href="basics.html" class="btn btn-neutral float-right" title="Getting Started" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+        <a href="getting-started.html" class="btn btn-neutral float-right" title="Getting Started" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
       
       
     </div>

@@ -34,10 +34,11 @@
   
   <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
   <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Experiments" href="experiments.html" />
-    <link rel="prev" title="Getting Started" href="basics.html" /> 
+    <link rel="prev" title="Basic Usage" href="basic-usage.html" /> 
 </head>
 
 <body class="wy-body-for-nav">
@@ -83,8 +84,15 @@
             
               <p class="caption"><span class="caption-text">Contents:</span></p>
 <ul class="current">
-<li class="toctree-l1"><a class="reference internal" href="basics.html">Getting Started</a></li>
-<li class="toctree-l1 current"><a class="current reference internal" href="#">Mathematical underpinnings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="basic-usage.html">Basic Usage</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Mathematical underpinnings</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#background">Background</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#why-should-the-batch-size-grow">Why should the batch size grow?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#how-should-the-batch-size-grow">How should the batch size grow?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#convergence">Convergence</a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="experiments.html">Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api.html">API</a></li>
 </ul>
@@ -153,15 +161,80 @@
            <div itemprop="articleBody">
             
   <div class="section" id="mathematical-underpinnings">
-<h1>Mathematical underpinnings<a class="headerlink" href="#mathematical-underpinnings" title="Permalink to this headline">¶</a></h1>
-<p><em>This page will summarize the content in</em> <a class="footnote-reference brackets" href="#id2" id="id1">1</a>.</p>
+<span id="sec-math"></span><h1>Mathematical underpinnings<a class="headerlink" href="#mathematical-underpinnings" title="Permalink to this headline">¶</a></h1>
+<p>Machine learning and big data go hand-in-hand. Fitting a machine learning model
+to this data can be expensive. For example, training OpenAI’s popular GPT model
+required a process that took “1 month on 8 GPUs” (<a class="reference external" href="https://openai.com/blog/language-unsupervised/">source</a>).</p>
+<p>Of course, it’d be convenient to get this results more quickly. But of course,
+performing more computation would cost a lot more. On Amazon EC2, using 32 GPUs
+for half a month would cost twice as much. Then, one questions is relevant:
+<strong>how can model training finish more quickly with same number of floating point
+operations?</strong></p>
+<div class="section" id="background">
+<h2>Background<a class="headerlink" href="#background" title="Permalink to this headline">¶</a></h2>
+<p>These machine learning problems solve minimizations of the form</p>
+<div class="math notranslate nohighlight">
+\[\widehat{w} = \arg\min_{w} \frac{1}{n}\sum_{i=1}^n f(w; z_i)\]</div>
+<p>where <span class="math notranslate nohighlight">\(z_i\)</span> is the <span class="math notranslate nohighlight">\(i\)</span> for a scalar target variable <span class="math notranslate nohighlight">\(y_i\)</span> and a feature
+vector <span class="math notranslate nohighlight">\(x_i\)</span>, then <span class="math notranslate nohighlight">\(f(w, z_i)\)</span> might measure the least squares loss
+with <span class="math notranslate nohighlight">\(f(w; z_i) = (y_i - x_i^T w)^2\)</span>.</p>
+<p>Typically, the number of examples <span class="math notranslate nohighlight">\(n\)</span> is very large. This is challenging
+for the optimization underlying machine learning. To help address this issue,
+the commonly used machine learning optimizations approximate the gradient with
+a small number of examples, aka the “batch size”. In the simplest form, these
+stochastic optimizations run updates of the form</p>
+<div class="math notranslate nohighlight">
+\[w_{k+1} = w_k - \gamma_k \sum_{i=1}^B \nabla f(w_k; z_{i_s})\]</div>
+<p>where <span class="math notranslate nohighlight">\(\nabla f(w_k; z_{i_s})\)</span> is the gradient for model <span class="math notranslate nohighlight">\(w_k\)</span> with example <span class="math notranslate nohighlight">\(i_s\)</span> where <span class="math notranslate nohighlight">\(i_s\)</span> is chosen uniformly at random.</p>
+<p>This means the gradient is approximated with a constant number of examples
+<span class="math notranslate nohighlight">\(B\)</span> regardless of how different the gradients are for each example.</p>
+</div>
+<div class="section" id="why-should-the-batch-size-grow">
+<h2>Why should the batch size grow?<a class="headerlink" href="#why-should-the-batch-size-grow" title="Permalink to this headline">¶</a></h2>
+<p>Why should the batch size be constant? With poor initialization, the gradients
+for each example might point in the same direction. Using one example to
+approximate the gradient will suffice if the gradient for each example is
+exactly the same (or if <span class="math notranslate nohighlight">\(\nabla f(w; z_i) = g\)</span> for all <span class="math notranslate nohighlight">\(i\)</span> and some
+vector <span class="math notranslate nohighlight">\(g\)</span>).</p>
+<p>Likewise, let’s say the model <span class="math notranslate nohighlight">\(w\)</span> is close to the optimum. Then the
+gradients for each example will point in different directions because the
+gradient for each example points to the optimal model for that example (and
+presumably all the data are unique).</p>
+<p>This is best illustrated with a simple 1D example. Let’s perform a simple
+minimization for illustration:</p>
+<div class="math notranslate nohighlight">
+\[\color{red}{\widehat{w}} = \arg\min_{\color{orange}{w}} \sum_{i=1}^{10} \frac{1}{2}(\color{blue}{y_i} - \color{orange}{w})^2\]</div>
+<p>Then the gradient for model <span class="math notranslate nohighlight">\(w_k\)</span> for each example will be
+<span class="math notranslate nohighlight">\(\color{green}{g_i = y_i - w_k}\)</span>.</p>
+<img alt="Example of how example gradients become more diverse as distance to optimum shrinks" class="align-center" src="_images/grad-div.svg" /><p>These example gradients <span class="math notranslate nohighlight">\(\color{green}{g_i}\)</span> are pretty similar with poor
+initialization: they’re all positive, and only differ in magnitude (between
+values of 0.5 and 1.5). Near the optimum, they’re very different: some
+gradients are positive, some are negative and some are approximately zero.</p>
+<p>This “gradient diversity” can be shown to increase in higher dimensions for
+various function classes. Gradient diversity measures the orthogonality between
+the gradients for each example <a class="footnote-reference brackets" href="#id6" id="id1">2</a>. Complete details of how this grows
+can be found in Section 4.1 of Sievert et.  al <a class="footnote-reference brackets" href="#id5" id="id2">1</a>.</p>
+</div>
+<div class="section" id="how-should-the-batch-size-grow">
+<h2>How should the batch size grow?<a class="headerlink" href="#how-should-the-batch-size-grow" title="Permalink to this headline">¶</a></h2>
+<p><cite>To be completed. Detailed in Section 4.2 of</cite> <a class="footnote-reference brackets" href="#id5" id="id3">1</a>.</p>
+</div>
+<div class="section" id="convergence">
+<h2>Convergence<a class="headerlink" href="#convergence" title="Permalink to this headline">¶</a></h2>
+<p><cite>To be completed. Detailed in Section 4.2 of</cite> <a class="footnote-reference brackets" href="#id5" id="id4">1</a>.</p>
 <dl class="footnote brackets">
-<dt class="label" id="id2"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
-<dd><p>“Improving the convergence of SGD with adaptive batch sizes”.
-Scott Sievert and Zachary Charles. 2019.
+<dt class="label" id="id5"><span class="brackets">1</span><span class="fn-backref">(<a href="#id2">1</a>,<a href="#id3">2</a>,<a href="#id4">3</a>)</span></dt>
+<dd><p>“Improving the convergence of SGD with adaptive batch
+sizes”.  Scott Sievert and Zachary Charles. 2019.
 <a class="reference external" href="https://arxiv.org/abs/1910.08222">https://arxiv.org/abs/1910.08222</a></p>
 </dd>
+<dt class="label" id="id6"><span class="brackets"><a class="fn-backref" href="#id1">2</a></span></dt>
+<dd><p>“Gradient Diversity: a Key Ingredient for Scalable Distributed
+Learning”. D Yin, A Pananjady, M Lam, D Papailiopoulos, K Ramchandran, P
+Bartlett. 2018. <a class="reference external" href="https://arxiv.org/abs/1706.05699">https://arxiv.org/abs/1706.05699</a></p>
+</dd>
 </dl>
+</div>
 </div>
 
 
@@ -179,7 +252,7 @@ Scott Sievert and Zachary Charles. 2019.
         <a href="experiments.html" class="btn btn-neutral float-right" title="Experiments" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
       
       
-        <a href="basics.html" class="btn btn-neutral float-left" title="Getting Started" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+        <a href="basic-usage.html" class="btn btn-neutral float-left" title="Basic Usage" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
       
     </div>
   

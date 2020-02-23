@@ -17,19 +17,19 @@ estimate, but can't compute as many model updates for the same computation budge
 
 This package provides a method founded in math to balance these two extremes.
 Balancing these two extremes means that **training will finished more
-quickly**. More detail can be found in the `Mathematical underpinning` and
-`Experiments` sections.
+quickly**. More detail can be found in the :ref:`sec-math` and
+:ref:`sec-exps` sections.
 
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
-   basics
+   getting-started
+   basic-usage
    math
    experiments
    api
-
 
 
 Indices and tables

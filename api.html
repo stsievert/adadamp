@@ -34,6 +34,7 @@
   
   <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
   <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
     <link rel="prev" title="Experiments" href="experiments.html" /> 
@@ -82,7 +83,8 @@
             
               <p class="caption"><span class="caption-text">Contents:</span></p>
 <ul class="current">
-<li class="toctree-l1"><a class="reference internal" href="basics.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="basic-usage.html">Basic Usage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="math.html">Mathematical underpinnings</a></li>
 <li class="toctree-l1"><a class="reference internal" href="experiments.html">Experiments</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">API</a></li>
@@ -159,63 +161,29 @@
 <dd><p>Damp the noise in the gradient estimate.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><dl class="simple">
-<dt><strong>model</strong><span class="classifier">nn.Module</span></dt><dd><p>The model to train</p>
-</dd>
-<dt><strong>dataset</strong><span class="classifier">torch.Dataset</span></dt><dd><p>Dataset to use for training</p>
-</dd>
-<dt><strong>opt</strong><span class="classifier">torch.optim.Optimizer</span></dt><dd><p>The optimizer to use</p>
-</dd>
-<dt><strong>loss</strong><span class="classifier">callable (function), default=torch.nn.F.nll_loss</span></dt><dd><p>The loss function to use. Must support the reduction keyword. Signature:
-<code class="docutils literal notranslate"><span class="pre">loss(output,</span> <span class="pre">target,</span> <span class="pre">reduction=&quot;sum&quot;)</span></code>.</p>
-</dd>
-<dt><strong>initial_batch_size</strong><span class="classifier">int, default=1</span></dt><dd><p>Initial batch size</p>
-</dd>
-<dt><strong>device</strong><span class="classifier">str, default=”cpu”</span></dt><dd><p>The device to use.</p>
-</dd>
-<dt><strong>max_batch_size</strong><span class="classifier">int, float, None, default=None</span></dt><dd><p>The maximum batch size. If the batch size is larger than this
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>model</strong> (<em>nn.Module</em>) – The model to train</p></li>
+<li><p><strong>dataset</strong> (<em>torch.Dataset</em>) – Dataset to use for training</p></li>
+<li><p><strong>opt</strong> (<em>torch.optim.Optimizer</em>) – The optimizer to use</p></li>
+<li><p><strong>loss</strong> (<em>callable</em><em> (</em><em>function</em><em>)</em><em>, </em><em>default=torch.nn.F.nll_loss</em>) – The loss function to use. Must support the reduction keyword. Signature:
+<code class="docutils literal notranslate"><span class="pre">loss(output,</span> <span class="pre">target,</span> <span class="pre">reduction=&quot;sum&quot;)</span></code>.</p></li>
+<li><p><strong>initial_batch_size</strong> (<em>int</em><em>, </em><em>default=1</em>) – Initial batch size</p></li>
+<li><p><strong>device</strong> (<em>str</em><em>, </em><em>default=&quot;cpu&quot;</em>) – The device to use.</p></li>
+<li><p><strong>max_batch_size</strong> (<em>int</em><em>, </em><em>float</em><em>, </em><em>None</em><em>, </em><em>default=None</em>) – The maximum batch size. If the batch size is larger than this
 value, the learning rate is decayed by an appropriate amount.
 If None, will automatically be set to be the size of the
-dataset. Setting to NaN will result in no maximum batch size.</p>
-</dd>
-<dt><strong>kwargs</strong><span class="classifier">dict</span></dt><dd><p>Arguments to pass to the underlying torch.DataLoader</p>
-</dd>
-</dl>
+dataset. Setting to NaN will result in no maximum batch size.</p></li>
+<li><p><strong>kwargs</strong> (<em>dict</em>) – Arguments to pass to the underlying torch.DataLoader</p></li>
+</ul>
 </dd>
 </dl>
 <p class="rubric">Notes</p>
 <p>By default, this class does not perform any damping (but it’s children
 do). If a function needs an instance of BaseDamper, this class can wrap
 any optimizer.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Attributes</dt>
-<dd class="field-odd"><dl class="simple">
-<dt><a class="reference internal" href="#adadamp.BaseDamper.meta" title="adadamp.BaseDamper.meta"><code class="xref py py-obj docutils literal notranslate"><span class="pre">meta</span></code></a></dt><dd><p>Get meta information about this optimizer, including number of model updates and number of examples processed.</p>
-</dd>
-</dl>
-</dd>
-</dl>
-<p class="rubric">Methods</p>
-<table class="longtable docutils align-default">
-<colgroup>
-<col style="width: 10%" />
-<col style="width: 90%" />
-</colgroup>
-<tbody>
-<tr class="row-odd"><td><p><a class="reference internal" href="#adadamp.BaseDamper.damping" title="adadamp.BaseDamper.damping"><code class="xref py py-obj docutils literal notranslate"><span class="pre">damping</span></code></a>(self)</p></td>
-<td><p>Determines how strongly noise in stochastic gradient estimate is damped.</p></td>
-</tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#adadamp.BaseDamper.get_params" title="adadamp.BaseDamper.get_params"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_params</span></code></a>(self)</p></td>
-<td><p>Get parameters for this optimzer.</p></td>
-</tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#adadamp.BaseDamper.step" title="adadamp.BaseDamper.step"><code class="xref py py-obj docutils literal notranslate"><span class="pre">step</span></code></a>(self, \*\*kwargs)</p></td>
-<td><p>Perform an optimization step</p></td>
-</tr>
-</tbody>
-</table>
 <dl class="method">
 <dt id="adadamp.BaseDamper.damping">
-<code class="sig-name descname">damping</code><span class="sig-paren">(</span><em class="sig-param">self</em><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.BaseDamper.damping" title="Permalink to this definition">¶</a></dt>
+<code class="sig-name descname">damping</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.BaseDamper.damping" title="Permalink to this definition">¶</a></dt>
 <dd><p>Determines how strongly noise in stochastic gradient
 estimate is damped.</p>
 <p class="rubric">Notes</p>
@@ -234,7 +202,7 @@ default, this wraps an optimizer with a static
 
 <dl class="method">
 <dt id="adadamp.BaseDamper.get_params">
-<code class="sig-name descname">get_params</code><span class="sig-paren">(</span><em class="sig-param">self</em><span class="sig-paren">)</span><a class="headerlink" href="#adadamp.BaseDamper.get_params" title="Permalink to this definition">¶</a></dt>
+<code class="sig-name descname">get_params</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#adadamp.BaseDamper.get_params" title="Permalink to this definition">¶</a></dt>
 <dd><p>Get parameters for this optimzer.</p>
 </dd></dl>
 
@@ -247,15 +215,12 @@ of model updates and number of examples processed.</p>
 
 <dl class="method">
 <dt id="adadamp.BaseDamper.step">
-<code class="sig-name descname">step</code><span class="sig-paren">(</span><em class="sig-param">self</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#adadamp.BaseDamper.step" title="Permalink to this definition">¶</a></dt>
+<code class="sig-name descname">step</code><span class="sig-paren">(</span><em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#adadamp.BaseDamper.step" title="Permalink to this definition">¶</a></dt>
 <dd><p>Perform an optimization step</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><dl class="simple">
-<dt><strong>kwargs</strong><span class="classifier">Dict[str, Any], optional</span></dt><dd><p>Arguments to pass to PyTorch’s <code class="docutils literal notranslate"><span class="pre">opt.step</span></code>
+<dd class="field-odd"><p><strong>kwargs</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>]</em><em>, </em><em>optional</em>) – Arguments to pass to PyTorch’s <code class="docutils literal notranslate"><span class="pre">opt.step</span></code>
 (e.g., <code class="xref py py-class docutils literal notranslate"><span class="pre">torch.optim.AdaGrad</span></code>)</p>
-</dd>
-</dl>
 </dd>
 </dl>
 </dd></dl>
@@ -265,35 +230,9 @@ of model updates and number of examples processed.</p>
 <dl class="class">
 <dt id="adadamp.AdaDamp">
 <em class="property">class </em><code class="sig-prename descclassname">adadamp.</code><code class="sig-name descname">AdaDamp</code><span class="sig-paren">(</span><em class="sig-param">*args</em>, <em class="sig-param">approx_loss=False</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#adadamp.AdaDamp" title="Permalink to this definition">¶</a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Attributes</dt>
-<dd class="field-odd"><dl class="simple">
-<dt><code class="xref py py-obj docutils literal notranslate"><span class="pre">meta</span></code></dt><dd><p>Get meta information about this optimizer, including number of model updates and number of examples processed.</p>
-</dd>
-</dl>
-</dd>
-</dl>
-<p class="rubric">Methods</p>
-<table class="longtable docutils align-default">
-<colgroup>
-<col style="width: 10%" />
-<col style="width: 90%" />
-</colgroup>
-<tbody>
-<tr class="row-odd"><td><p><a class="reference internal" href="#adadamp.AdaDamp.damping" title="adadamp.AdaDamp.damping"><code class="xref py py-obj docutils literal notranslate"><span class="pre">damping</span></code></a>(self)</p></td>
-<td><p>Adaptively damp the noise depending on the current loss with</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_params</span></code>(self)</p></td>
-<td><p>Get parameters for this optimzer.</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">step</span></code>(self, \*\*kwargs)</p></td>
-<td><p>Perform an optimization step</p></td>
-</tr>
-</tbody>
-</table>
-<dl class="method">
+<dd><dl class="method">
 <dt id="adadamp.AdaDamp.damping">
-<code class="sig-name descname">damping</code><span class="sig-paren">(</span><em class="sig-param">self</em><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.AdaDamp.damping" title="Permalink to this definition">¶</a></dt>
+<code class="sig-name descname">damping</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.AdaDamp.damping" title="Permalink to this definition">¶</a></dt>
 <dd><p>Adaptively damp the noise depending on the current loss with</p>
 <div class="math notranslate nohighlight">
 \[B_k = \left\lceil B_0\frac{F(x_0) - F^\star}{F(x_k) - F^\star}\right\rceil\]</div>
@@ -309,20 +248,18 @@ of model updates and number of examples processed.</p>
 <dl class="class">
 <dt id="adadamp.PadaDamp">
 <em class="property">class </em><code class="sig-prename descclassname">adadamp.</code><code class="sig-name descname">PadaDamp</code><span class="sig-paren">(</span><em class="sig-param">*args</em>, <em class="sig-param">batch_growth_rate=None</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#adadamp.PadaDamp" title="Permalink to this definition">¶</a></dt>
-<dd><dl class="field-list">
+<dd><dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><dl>
-<dt><strong>args</strong><span class="classifier">list</span></dt><dd><p>Passed to BaseDamper</p>
-</dd>
-<dt><strong>batch_growth_rate</strong><span class="classifier">float</span></dt><dd><p>The rate to increase the damping by. That is, set the batch size
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>args</strong> (<em>list</em>) – Passed to BaseDamper</p></li>
+<li><p><strong>batch_growth_rate</strong> (<em>float</em>) – <p>The rate to increase the damping by. That is, set the batch size
 to be</p>
 <div class="math notranslate nohighlight">
 \[B_k = B_0 \lceil \textrm{rate}\cdot k \rceil\]</div>
 <p>after the model is updated <span class="math notranslate nohighlight">\(k\)</span> times.</p>
-</dd>
-<dt><strong>kwargs</strong><span class="classifier">dict</span></dt><dd><p>Passed to BaseDamper</p>
-</dd>
-</dl>
+</p></li>
+<li><p><strong>kwargs</strong> (<em>dict</em>) – Passed to BaseDamper</p></li>
+</ul>
 </dd>
 </dl>
 <p class="rubric">Notes</p>
@@ -336,35 +273,9 @@ to be</p>
 functions. It is not appropriate for strongly convex loss or PL
 functions.</p>
 </div>
-<dl class="field-list simple">
-<dt class="field-odd">Attributes</dt>
-<dd class="field-odd"><dl class="simple">
-<dt><code class="xref py py-obj docutils literal notranslate"><span class="pre">meta</span></code></dt><dd><p>Get meta information about this optimizer, including number of model updates and number of examples processed.</p>
-</dd>
-</dl>
-</dd>
-</dl>
-<p class="rubric">Methods</p>
-<table class="longtable docutils align-default">
-<colgroup>
-<col style="width: 10%" />
-<col style="width: 90%" />
-</colgroup>
-<tbody>
-<tr class="row-odd"><td><p><a class="reference internal" href="#adadamp.PadaDamp.damping" title="adadamp.PadaDamp.damping"><code class="xref py py-obj docutils literal notranslate"><span class="pre">damping</span></code></a>(self)</p></td>
-<td><p>Approximate AdaDamp with less computation via</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_params</span></code>(self)</p></td>
-<td><p>Get parameters for this optimzer.</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">step</span></code>(self, \*\*kwargs)</p></td>
-<td><p>Perform an optimization step</p></td>
-</tr>
-</tbody>
-</table>
 <dl class="method">
 <dt id="adadamp.PadaDamp.damping">
-<code class="sig-name descname">damping</code><span class="sig-paren">(</span><em class="sig-param">self</em><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.PadaDamp.damping" title="Permalink to this definition">¶</a></dt>
+<code class="sig-name descname">damping</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.PadaDamp.damping" title="Permalink to this definition">¶</a></dt>
 <dd><p>Approximate AdaDamp with less computation via</p>
 <div class="math notranslate nohighlight">
 \[B_k = B_0 + \lceil \textrm{rate}\cdot k\rceil\]</div>
@@ -376,35 +287,9 @@ functions.</p>
 <dl class="class">
 <dt id="adadamp.GeoDamp">
 <em class="property">class </em><code class="sig-prename descclassname">adadamp.</code><code class="sig-name descname">GeoDamp</code><span class="sig-paren">(</span><em class="sig-param">*args</em>, <em class="sig-param">dampingdelay=5</em>, <em class="sig-param">dampingfactor=2</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#adadamp.GeoDamp" title="Permalink to this definition">¶</a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Attributes</dt>
-<dd class="field-odd"><dl class="simple">
-<dt><code class="xref py py-obj docutils literal notranslate"><span class="pre">meta</span></code></dt><dd><p>Get meta information about this optimizer, including number of model updates and number of examples processed.</p>
-</dd>
-</dl>
-</dd>
-</dl>
-<p class="rubric">Methods</p>
-<table class="longtable docutils align-default">
-<colgroup>
-<col style="width: 10%" />
-<col style="width: 90%" />
-</colgroup>
-<tbody>
-<tr class="row-odd"><td><p><a class="reference internal" href="#adadamp.GeoDamp.damping" title="adadamp.GeoDamp.damping"><code class="xref py py-obj docutils literal notranslate"><span class="pre">damping</span></code></a>(self)</p></td>
-<td><p>Set the batch size to increase by <code class="docutils literal notranslate"><span class="pre">dampingfactor</span></code> every <code class="docutils literal notranslate"><span class="pre">dampingdelay</span></code> epochs.</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_params</span></code>(self)</p></td>
-<td><p>Get parameters for this optimzer.</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">step</span></code>(self, \*\*kwargs)</p></td>
-<td><p>Perform an optimization step</p></td>
-</tr>
-</tbody>
-</table>
-<dl class="method">
+<dd><dl class="method">
 <dt id="adadamp.GeoDamp.damping">
-<code class="sig-name descname">damping</code><span class="sig-paren">(</span><em class="sig-param">self</em><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.GeoDamp.damping" title="Permalink to this definition">¶</a></dt>
+<code class="sig-name descname">damping</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.GeoDamp.damping" title="Permalink to this definition">¶</a></dt>
 <dd><p>Set the batch size to increase by <code class="docutils literal notranslate"><span class="pre">dampingfactor</span></code> every
 <code class="docutils literal notranslate"><span class="pre">dampingdelay</span></code> epochs.</p>
 </dd></dl>
@@ -414,35 +299,9 @@ functions.</p>
 <dl class="class">
 <dt id="adadamp.GeoDampLR">
 <em class="property">class </em><code class="sig-prename descclassname">adadamp.</code><code class="sig-name descname">GeoDampLR</code><span class="sig-paren">(</span><em class="sig-param">*args</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#adadamp.GeoDampLR" title="Permalink to this definition">¶</a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Attributes</dt>
-<dd class="field-odd"><dl class="simple">
-<dt><code class="xref py py-obj docutils literal notranslate"><span class="pre">meta</span></code></dt><dd><p>Get meta information about this optimizer, including number of model updates and number of examples processed.</p>
-</dd>
-</dl>
-</dd>
-</dl>
-<p class="rubric">Methods</p>
-<table class="longtable docutils align-default">
-<colgroup>
-<col style="width: 10%" />
-<col style="width: 90%" />
-</colgroup>
-<tbody>
-<tr class="row-odd"><td><p><a class="reference internal" href="#adadamp.GeoDampLR.damping" title="adadamp.GeoDampLR.damping"><code class="xref py py-obj docutils literal notranslate"><span class="pre">damping</span></code></a>(self)</p></td>
-<td><p>Set the learning rate to decrease by <code class="docutils literal notranslate"><span class="pre">dampingfactor</span></code> every <code class="docutils literal notranslate"><span class="pre">dampingdelay</span></code> epochs.</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_params</span></code>(self)</p></td>
-<td><p>Get parameters for this optimzer.</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">step</span></code>(self, \*\*kwargs)</p></td>
-<td><p>Perform an optimization step</p></td>
-</tr>
-</tbody>
-</table>
-<dl class="method">
+<dd><dl class="method">
 <dt id="adadamp.GeoDampLR.damping">
-<code class="sig-name descname">damping</code><span class="sig-paren">(</span><em class="sig-param">self</em><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.GeoDampLR.damping" title="Permalink to this definition">¶</a></dt>
+<code class="sig-name descname">damping</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.GeoDampLR.damping" title="Permalink to this definition">¶</a></dt>
 <dd><p>Set the learning rate to decrease by <code class="docutils literal notranslate"><span class="pre">dampingfactor</span></code> every
 <code class="docutils literal notranslate"><span class="pre">dampingdelay</span></code> epochs.</p>
 </dd></dl>
@@ -452,35 +311,9 @@ functions.</p>
 <dl class="class">
 <dt id="adadamp.CntsDampLR">
 <em class="property">class </em><code class="sig-prename descclassname">adadamp.</code><code class="sig-name descname">CntsDampLR</code><span class="sig-paren">(</span><em class="sig-param">*args</em>, <em class="sig-param">dampingfactor=0.02</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#adadamp.CntsDampLR" title="Permalink to this definition">¶</a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Attributes</dt>
-<dd class="field-odd"><dl class="simple">
-<dt><code class="xref py py-obj docutils literal notranslate"><span class="pre">meta</span></code></dt><dd><p>Get meta information about this optimizer, including number of model updates and number of examples processed.</p>
-</dd>
-</dl>
-</dd>
-</dl>
-<p class="rubric">Methods</p>
-<table class="longtable docutils align-default">
-<colgroup>
-<col style="width: 10%" />
-<col style="width: 90%" />
-</colgroup>
-<tbody>
-<tr class="row-odd"><td><p><a class="reference internal" href="#adadamp.CntsDampLR.damping" title="adadamp.CntsDampLR.damping"><code class="xref py py-obj docutils literal notranslate"><span class="pre">damping</span></code></a>(self)</p></td>
-<td><p>Decay the learning rate by <span class="math notranslate nohighlight">\(1/k\)</span> after <span class="math notranslate nohighlight">\(k\)</span> model updates.</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_params</span></code>(self)</p></td>
-<td><p>Get parameters for this optimzer.</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">step</span></code>(self, \*\*kwargs)</p></td>
-<td><p>Perform an optimization step</p></td>
-</tr>
-</tbody>
-</table>
-<dl class="method">
+<dd><dl class="method">
 <dt id="adadamp.CntsDampLR.damping">
-<code class="sig-name descname">damping</code><span class="sig-paren">(</span><em class="sig-param">self</em><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.CntsDampLR.damping" title="Permalink to this definition">¶</a></dt>
+<code class="sig-name descname">damping</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.CntsDampLR.damping" title="Permalink to this definition">¶</a></dt>
 <dd><p>Decay the learning rate by <span class="math notranslate nohighlight">\(1/k\)</span> after <span class="math notranslate nohighlight">\(k\)</span> model updates.</p>
 </dd></dl>
 
@@ -490,43 +323,9 @@ functions.</p>
 <dt id="adadamp.GradientDescent">
 <em class="property">class </em><code class="sig-prename descclassname">adadamp.</code><code class="sig-name descname">GradientDescent</code><span class="sig-paren">(</span><em class="sig-param">*args</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#adadamp.GradientDescent" title="Permalink to this definition">¶</a></dt>
 <dd><p>This class performs full gradient descent.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Attributes</dt>
-<dd class="field-odd"><dl class="simple">
-<dt><code class="xref py py-obj docutils literal notranslate"><span class="pre">meta</span></code></dt><dd><p>Get meta information about this optimizer, including number of model updates and number of examples processed.</p>
-</dd>
-</dl>
-</dd>
-</dl>
-<p class="rubric">Methods</p>
-<table class="longtable docutils align-default">
-<colgroup>
-<col style="width: 10%" />
-<col style="width: 90%" />
-</colgroup>
-<tbody>
-<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_params</span></code>(self)</p></td>
-<td><p>Get parameters for this optimzer.</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">step</span></code>(self, \*\*kwargs)</p></td>
-<td><p>Perform an optimization step</p></td>
-</tr>
-</tbody>
-</table>
-<table class="docutils align-default">
-<colgroup>
-<col style="width: 52%" />
-<col style="width: 48%" />
-</colgroup>
-<tbody>
-<tr class="row-odd"><td><p><strong>damping</strong></p></td>
-<td></td>
-</tr>
-</tbody>
-</table>
 <dl class="method">
 <dt id="adadamp.GradientDescent.damping">
-<code class="sig-name descname">damping</code><span class="sig-paren">(</span><em class="sig-param">self</em><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.GradientDescent.damping" title="Permalink to this definition">¶</a></dt>
+<code class="sig-name descname">damping</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; int<a class="headerlink" href="#adadamp.GradientDescent.damping" title="Permalink to this definition">¶</a></dt>
 <dd></dd></dl>
 
 </dd></dl>
