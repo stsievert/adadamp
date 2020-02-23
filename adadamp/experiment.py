@@ -25,16 +25,16 @@ def run(
     test_set=None,
     args=None,
     test_freq: Optional[Number] = None,
+    train_stats: bool = True,
 ):
     data = []
     train_data = []
     for k in itertools.count():
-        test_kwargs = dict(model=model, loss=opt.loss)
-        train_stats = test(dataset=train_set, prefix="train", **test_kwargs)
+        test_kwargs = dict(model=model, loss=opt._loss)
+        train_stats = {}
+        if train_stats:
+            train_stats = test(dataset=train_set, prefix="train", **test_kwargs)
         test_stats = test(dataset=test_set, prefix="test", **test_kwargs)
-        #  train_stats = {}
-        #  test_stats = {}
-        #  print(test_stats)
         data.append({**args, **opt.meta, **train_stats, **test_stats})
         _s = {
             k: v
@@ -59,7 +59,7 @@ def run(
         if epoch >= args["epochs"]:
             break
         try:
-            model, opt, epoch_data, epoch_meta = train(
+            model, opt, epoch_meta, epoch_data = train(
                 model,
                 opt,
                 verbose=args["verbose"],
@@ -114,7 +114,7 @@ def train(
     _loop_start = time()
     while True:
         num_examples_so_far = opt._meta["num_examples"] - start_examples
-        if num_examples_so_far >= epochs * len(opt.dataset):
+        if num_examples_so_far >= epochs * len(opt._dataset):
             break
         opt.step()
         data.append(opt.meta)

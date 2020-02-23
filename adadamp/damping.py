@@ -68,18 +68,22 @@ class BaseDamper:
         best_train_loss: Optional[float] = None,
         **kwargs,
     ):
-        self._params: Set[str] = {
-            "device_type",
-            "initial_batch_size",
-            "loss_name",
-            "max_batch_size",
-        }
+        # Public
         self.initial_batch_size = initial_batch_size
-        self.loss = loss
         if max_batch_size is None:
             max_batch_size = len(dataset)
         self.max_batch_size = max_batch_size
-        self.model = model
+
+        # Private
+        self._model = model
+        self._loss = loss
+        self._opt = opt
+        self.initial_lr = self._get_lr()
+        self._dataset = dataset
+        self._device = torch.device(device)
+        sampler = RandomSampler(dataset, replacement=True)
+        self._loader = DataLoader(dataset, sampler=sampler, drop_last=True, **kwargs,)
+        self._data_iter = iter(self._loader)
 
         self._meta: Dict[str, Any] = {
             "model_updates": 0,
@@ -88,17 +92,11 @@ class BaseDamper:
             "num_params": sum([m.nelement() for m in model.parameters()]),
             "len_dataset": len(dataset),
             "damper": opt.__class__.__name__.lower(),
+            "device_type": self._device.type,
+            "loss_name": self._loss.__name__,
+            "opt_name": self._opt.__class__.__name__,
         }
         self._meta.update({f"opt_param_{k}": v for k, v in opt.defaults.items()})
-        self.opt = opt
-        self.dataset = dataset
-        self.loss = loss
-        self.param_groups = self.opt.param_groups
-        self.device = torch.device(device)
-        sampler = RandomSampler(dataset, replacement=True)
-        self.loader = DataLoader(dataset, sampler=sampler, drop_last=True, **kwargs,)
-        self._data_iter = iter(self.loader)
-        self._initial_lr = self._get_lr()
 
     def step(self, **kwargs):
         """Perform an optimization step
@@ -112,14 +110,14 @@ class BaseDamper:
         start = time()
         damping = self.damping()
         self._meta["damping_time"] = time() - start
-        self.loader.batch_sampler.batch_size = int(damping)
+        self._loader.batch_sampler.batch_size = int(damping)
 
         # Is the batch size too large? If so, decay the learning rate
-        current_bs = self.loader.batch_sampler.batch_size
+        current_bs = self._loader.batch_sampler.batch_size
         max_bs = self.max_batch_size
         if max_bs is not None and current_bs >= max_bs:
-            self._set_lr(self._initial_lr * max_bs / current_bs)
-            self.loader.batch_sampler.batch_size = max_bs
+            self._set_lr(self.initial_lr * max_bs / current_bs)
+            self._loader.batch_sampler.batch_size = max_bs
 
         batch_loss, num_examples = self._step(**kwargs)
         if batch_loss >= 1e6:
@@ -133,7 +131,7 @@ class BaseDamper:
         self._meta["num_examples"] += num_examples
         self._meta["batch_loss"] = batch_loss
         self._meta["damping"] = damping
-        self._meta["batch_size"] = self.loader.batch_sampler.batch_size
+        self._meta["batch_size"] = self._loader.batch_sampler.batch_size
 
     def damping(self) -> int:
         """Determines how strongly noise in stochastic gradient
@@ -159,20 +157,20 @@ class BaseDamper:
         try:
             data, target = next(self._data_iter)
         except StopIteration:
-            self._data_iter = iter(self.loader)
+            self._data_iter = iter(self._loader)
             if batch_size is not None:
-                original_bs = copy(self.loader.batch_sampler.batch_size)
-                self.loader.batch_sampler.batch_size = batch_size
+                original_bs = copy(self._loader.batch_sampler.batch_size)
+                self._loader.batch_sampler.batch_size = batch_size
             data, target = next(self._data_iter)
-        assert self.loader.batch_sampler.batch_size > 0
+        assert self._loader.batch_sampler.batch_size > 0
         if batch_size is not None:
-            self.loader.batch_sampler.batch_size = original_bs
+            self._loader.batch_sampler.batch_size = original_bs
         return data, target
 
     def _step(self, **kwargs):
         start = time()
 
-        bs = copy(self.loader.batch_sampler.batch_size)
+        bs = copy(self._loader.batch_sampler.batch_size)
         if bs <= self._meta["len_dataset"]:
             data, target = self._get_batch()
             self._sizes = {"data": data.size(), "target": target.size()}
@@ -186,33 +184,32 @@ class BaseDamper:
                 target = torch.cat((target, t))  # , out=target)
                 if len(data) >= bs:
                     break
-            bs2 = copy(self.loader.batch_sampler.batch_size)
+            bs2 = copy(self._loader.batch_sampler.batch_size)
             assert bs == bs2
 
-        data, target = data.to(self.device), target.to(self.device)
-        self.opt.zero_grad()
-        output = self.model(data)
-        loss = self.loss(output, target, reduction="sum")
+        data, target = data.to(self._device), target.to(self._device)
+        self._opt.zero_grad()
+        output = self._model(data)
+        loss = self._loss(output, target, reduction="sum")
         loss *= 1 / len(data)
         loss.backward()
-        self.opt.step(**kwargs)
+        self._opt.step(**kwargs)
         self._meta["_step_time"] = time() - start
         return loss.item(), len(data)
 
     def _set_lr(self, lr):
-        for group in self.opt.param_groups:
+        for group in self._opt.param_groups:
             group["lr"] = lr
-        return self.opt
+        return self._opt
 
     def _get_lr(self):
-        lrs = [group["lr"] for group in self.opt.param_groups]
+        lrs = [group["lr"] for group in self._opt.param_groups]
         assert all(lr == lrs[0] for lr in lrs)
         return lrs[0]
 
     def get_params(self):
         """Get parameters for this optimzer."""
-        params = {k: v for k, v in self.__dict__.items() if k in self._params}
-        return params
+        return {k: v for k, v in self.__dict__.items() if k[0] != "_"}
 
     @property
     def meta(self):
@@ -221,8 +218,6 @@ class BaseDamper:
         """
         d = copy(self._meta)
         d.update(self.get_params())
-        d["device_type"] = self.device.type
-        d["loss_name"] = self.loss.__name__
         d["epochs"] = d["num_examples"] / d["len_dataset"]
         return d
 
@@ -230,7 +225,7 @@ class BaseDamper:
         self, dataset: Optional[Dataset] = None, frac: Optional[float] = None,
     ):
         if dataset is None:
-            dataset = self.dataset
+            dataset = self._dataset
         num_eg = len(dataset)
         if frac is not None:
             num_eg = int(frac * len(dataset))
@@ -246,10 +241,10 @@ class BaseDamper:
         _num_eg = 0
         with torch.no_grad():
             for data, target in loader:
-                data, target = data.to(self.device), target.to(self.device)
+                data, target = data.to(self._device), target.to(self._device)
                 _num_eg += len(data)
-                output = self.model(data)
-                loss = self.loss(output, target, reduction="sum")
+                output = self._model(data)
+                loss = self._loss(output, target, reduction="sum")
                 total_loss += loss.item()
                 if frac is not None and _num_eg >= num_eg:
                     break
@@ -282,7 +277,7 @@ class AdaDamp(BaseDamper):
         else:
             loss = self._meta["batch_loss"]
             if loss is None or self._meta["batch_size"] <= 25:
-                loss = self.get_loss(frac=0.1)
+                loss = self._get_loss(frac=0.1)
             if loss >= 1e6:
                 raise ConvergenceError(f"loss with approx_loss too high ({loss:0.2e})")
             loss *= 0.95
@@ -382,7 +377,7 @@ class GeoDampLR(GeoDamp):
         """Set the learning rate to decrease by ``dampingfactor`` every
         ``dampingdelay`` epochs.
         """
-        super().damping()
+        return super().damping()
 
 
 class CntsDampLR(BaseDamper):
@@ -407,9 +402,9 @@ class GradientDescent(BaseDamper):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "gd"
-        sampler = SequentialSampler(self.dataset)
-        self.loader = DataLoader(self.dataset, sampler=sampler)
-        self._data_iter = iter(self.loader)
+        sampler = SequentialSampler(self._dataset)
+        self._loader = DataLoader(self._dataset, sampler=sampler)
+        self._data_iter = iter(self._loader)
 
     def damping(self) -> int:
         """ """
