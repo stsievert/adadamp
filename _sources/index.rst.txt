@@ -25,7 +25,7 @@ quickly**. More detail can be found in the :ref:`sec-math` and
    :maxdepth: 2
    :caption: Contents:
 
-   getting-started
+   installation
    basic-usage
    math
    experiments
