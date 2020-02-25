@@ -207,12 +207,12 @@ class BaseDamper:
         assert all(lr == lrs[0] for lr in lrs)
         return lrs[0]
 
-    def get_params(self):
+    def get_params(self) -> Dict[str, Any]:
         """Get parameters for this optimzer."""
         return {k: v for k, v in self.__dict__.items() if k[0] != "_"}
 
     @property
-    def meta(self):
+    def meta(self) -> Dict[str, Any]:
         """Get meta information about this optimizer, including number
         of model updates and number of examples processed.
         """
@@ -396,8 +396,7 @@ class CntsDampLR(BaseDamper):
 
 
 class GradientDescent(BaseDamper):
-    """This class performs full gradient descent.
-    """
+    """This class performs full gradient descent."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

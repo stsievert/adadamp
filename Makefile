@@ -9,4 +9,3 @@ upload:
 
 clean:
 	rm -rf dist
-
