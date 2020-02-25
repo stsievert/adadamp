@@ -87,7 +87,12 @@
 <li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="basic-usage.html">Basic Usage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="math.html">Mathematical underpinnings</a></li>
-<li class="toctree-l1 current"><a class="current reference internal" href="#">Experiments</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Experiments</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#synthetic-experiments">Synthetic experiments</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#distributed-system-setup">Distributed system setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#distributed-experiments">Distributed experiments</a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="api.html">API</a></li>
 </ul>
 
@@ -156,18 +161,77 @@
             
   <div class="section" id="experiments">
 <span id="sec-exps"></span><h1>Experiments<a class="headerlink" href="#experiments" title="Permalink to this headline">¶</a></h1>
+<p>In <a class="reference internal" href="math.html#sec-math"><span class="std std-ref">Mathematical underpinnings</span></a>, we showed the method we proposed should require far fewer
+<strong>model updates</strong> than SGD while requiring no more floating point operations.
+The number of model updates can be a good proxy for time spent training, at
+least with a particular setup of a distributed system <a class="reference internal" href="#imagenet-1hr" id="id1"><span>[imagenet-1hr]</span></a>.</p>
+<p>This page will show experimental results that show using the proposed batch
+size method results in spending less time training ML models. This will require
+a particular configuration of a distributed system.</p>
+<div class="section" id="synthetic-experiments">
+<h2>Synthetic experiments<a class="headerlink" href="#synthetic-experiments" title="Permalink to this headline">¶</a></h2>
 <p><em>To be updated shortly with experimental results that confirm</em> <a class="reference internal" href="math.html#sec-math"><span class="std std-ref">Mathematical underpinnings</span></a>.
 <em>These experiments will be improved versions of the experiments in Section 6.1
-of</em> <a class="footnote-reference brackets" href="#id2" id="id1">1</a>.</p>
-<p><em>After that I plan to update this page with the experimental results mentioned
+of</em> <a class="footnote-reference brackets" href="#id4" id="id2">1</a>.</p>
+<p>First, let’s illustrate that the proposed batch size method requires far fewer
+model updates. To do this, let’s train a neural network (without any activation
+function) on synthetic data.</p>
+<div class="math notranslate nohighlight">
+\[\min_{w_3, W_2, W_1} \sum_{i=1}^{n} (y_i - w_3^T W_2 W_1)^2\]</div>
+<p>This is a remarkably complicated way to perform linear regression model, but it
+does introduce some more complexity into the loss function (mostly
+non-convexity). When we run our adaptive method against other competing
+methods, we get these results:</p>
+<div class="figure align-center" id="id5">
+<img alt="_images/synth.svg" src="_images/synth.svg" /><p class="caption"><span class="caption-text">The loss for various optimizers on the neural network above. Lower values
+imply a better model. The test loss of the ERM minimizer is shown with the
+dashed line.</span><a class="headerlink" href="#id5" title="Permalink to this image">¶</a></p>
+</div>
+<p>As expected, we find that <a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a> has a minimal number of
+model updates and minimal computation:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a> has the number of model updates as gradient descent</p></li>
+<li><p><a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a> does no more computation than
+<code class="xref py py-class docutils literal notranslate"><span class="pre">SGD</span></code></p></li>
+</ul>
+<p>Of course, the batch size of AdaDamp is intense to compute. However, there are
+some workarounds to this; the batch size grows closely follows an exponential
+function as if the bounds were tight. This is some of the motivation behind
+<a class="reference internal" href="api.html#adadamp.PadaDamp" title="adadamp.PadaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">PadaDamp</span></code></a>.</p>
+</div>
+<div class="section" id="distributed-system-setup">
+<h2>Distributed system setup<a class="headerlink" href="#distributed-system-setup" title="Permalink to this headline">¶</a></h2>
+<p>Training ML models more quickly requires growing the number of workers with the
+batch size. That is, if the batch size is 256 there should be 8 workers so each
+worker computes gradients for 32 examples. If the batch size if 512, there
+should be 16 workers so the number of gradients computed per worker is
+constant.</p>
+<p>When the distributed is configured this way, a model update takes the same
+amount time regardless of the batch size <a class="reference internal" href="#imagenet-1hr" id="id3"><span>[imagenet-1hr]</span></a>. In their experiments,
+they increase the batch size by <span class="math notranslate nohighlight">\(44\times\)</span> and the model update time
+only takes <span class="math notranslate nohighlight">\(1.12\times\)</span> longer. That’s shown in their Figure 7:</p>
+<a class="reference internal image-reference" href="_images/goyal-fig7-edits.png"><img alt="_images/goyal-fig7-edits.png" class="align-center" src="_images/goyal-fig7-edits.png" style="width: 60%;" /></a>
+</div>
+<div class="section" id="distributed-experiments">
+<h2>Distributed experiments<a class="headerlink" href="#distributed-experiments" title="Permalink to this headline">¶</a></h2>
+<p><em>I plan to update this section with the experimental results mentioned
 in my SciPy 2020 proposal.</em></p>
 <dl class="footnote brackets">
-<dt class="label" id="id2"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dt class="label" id="id4"><span class="brackets"><a class="fn-backref" href="#id2">1</a></span></dt>
 <dd><p>“Improving the convergence of SGD with adaptive batch
 sizes”.  Scott Sievert and Zachary Charles. 2019.
 <a class="reference external" href="https://arxiv.org/abs/1910.08222">https://arxiv.org/abs/1910.08222</a></p>
 </dd>
 </dl>
+<dl class="citation">
+<dt class="label" id="imagenet-1hr"><span class="brackets">imagenet-1hr</span><span class="fn-backref">(<a href="#id1">1</a>,<a href="#id3">2</a>)</span></dt>
+<dd><p>Section 5.5 of “Accurate, Large Minibatch SGD: Training
+ImageNet in 1 Hour” P. Goyal, P. Dollár, R. Girshick, P.
+Noordhuis, L. Wesolowski, A. Kyrola, A.  Tulloch Y. Jia, and
+K. He. 2018. <a class="reference external" href="https://arXiv.org/abs/1706.02677">https://arXiv.org/abs/1706.02677</a></p>
+</dd>
+</dl>
+</div>
 </div>
 
 
