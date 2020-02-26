@@ -168,5 +168,6 @@ def test_get_params(model, dataset):
         "loss_name",
         "epochs",
         "damper",
+        "opt_name",
     }
     assert set(opt.meta.keys()) == param_keys.union(meta_keys)

@@ -8,7 +8,6 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 
-from adadamp.experiment import train, test
 from adadamp import PadaDamp
 
 
@@ -29,10 +28,12 @@ class Net(nn.Module):
         return output
 
 
-def main():
+def test_main():
+    from adadamp.experiment import train, test
+
     # Training settings
     args = SimpleNamespace(
-        batch_size=1024,  # too large for easier testing
+        batch_size=1024,
         epochs=2,
         log_interval=10,
         lr=0.1,
@@ -64,6 +65,10 @@ def main():
         ),
     )
 
+    # Only for making tests run faster
+    dataset, _ = torch.utils.data.random_split(train_set, [2000, len(train_set) - 2000])
+    train_set, test_set = torch.utils.data.random_split(dataset, [1000, 1000])
+
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
 
     model = Net().to(device)
@@ -88,7 +93,3 @@ def main():
 
     if args.save_model:
         torch.save(model.state_dict(), "mnist_cnn.pt")
-
-
-if __name__ == "__main__":
-    main()

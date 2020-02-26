@@ -78,7 +78,7 @@ class BaseDamper:
         self._model = model
         self._loss = loss
         self._opt = opt
-        self.initial_lr = self._get_lr()
+        self._initial_lr = self._get_lr()
         self._dataset = dataset
         self._device = torch.device(device)
         sampler = RandomSampler(dataset, replacement=True)
@@ -116,7 +116,7 @@ class BaseDamper:
         current_bs = self._loader.batch_sampler.batch_size
         max_bs = self.max_batch_size
         if max_bs is not None and current_bs >= max_bs:
-            self._set_lr(self.initial_lr * max_bs / current_bs)
+            self._set_lr(self._initial_lr * max_bs / current_bs)
             self._loader.batch_sampler.batch_size = max_bs
 
         batch_loss, num_examples = self._step(**kwargs)

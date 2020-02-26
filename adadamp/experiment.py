@@ -107,7 +107,7 @@ def train(
         )
     if verbose:
         verbose = int(verbose) if isinstance(verbose, bool) else verbose
-        print_eg = int(len(opt.dataset) / verbose)
+        print_eg = int(len(opt._dataset) / verbose)
     start_examples = opt._meta["num_examples"]
     old_examples = opt._meta["num_examples"]
     data = []
