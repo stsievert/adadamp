@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple, Any, Union, Optional
+from typing import List, Dict, Tuple, Any, Union, Optional, Callable
 import itertools
 from pprint import pprint
 from time import time
@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch
 
 from .damping import AdaDamp, GeoDamp, PadaDamp, BaseDamper, ConvergenceError
+from .dist import gradient
 
 Number = Union[int, float]
 
