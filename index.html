@@ -155,17 +155,28 @@
             
   <div class="section" id="welcome-to-adadamp-s-documentation">
 <h1>Welcome to adadamp’s documentation!<a class="headerlink" href="#welcome-to-adadamp-s-documentation" title="Permalink to this headline">¶</a></h1>
-<p>The optimization underlying machine learning has to handle big data.  It does
-this by approximating the loss function’s gradient with a few examples, aka the
-batch size. This is nearly universal among different optimization methods.</p>
+<p>The optimization underlying machine learning has to handle big data. For
+example, <a class="reference external" href="https://en.wikipedia.org/wiki/MNIST_database">the MNIST dataset</a> has 60,000 images in the training set, and that’s a
+small dataset. By comparison, the popular <a class="reference external" href="https://en.wikipedia.org/wiki/ImageNet">ImageNet dataset</a> has over 10 million images.</p>
+<p>Machine learning tries to minimize a “loss function” that depends on every
+example in the dataset (or conversely, maximize a “quality function”).  This
+requires the gradient of the loss function, which depends on every data. If
+there aren’t many examples, “gradient descent” is used or a modification
+thereof.</p>
+<p>However, most machine learning models require thousands of gradient
+computations. To avoid this, machine learning uses <cite>stochastic</cite> gradient
+descent (SGD) which approximates the loss function’s gradient with a few
+examples, aka the batch size. This is nearly universal among different
+optimization methods.</p>
 <p>How should the batch size be selected? Small batch sizes will result in highly
 variable gradient estimates but can compute many model updates for a given
 computation budget. Large batch sizes will result in more precise gradient
 estimate, but can’t compute as many model updates for the same computation budget.</p>
 <p>This package provides a method founded in math to balance these two extremes.
-Balancing these two extremes means that <strong>training will finished more
-quickly</strong>. More detail can be found in the <a class="reference internal" href="math.html#sec-math"><span class="std std-ref">Mathematical underpinnings</span></a> and
-<a class="reference internal" href="experiments.html#sec-exps"><span class="std std-ref">Experiments</span></a> sections.</p>
+Use of this package will result in two benefits, at least with a particular
+setup of a distributed system: machine learning <strong>models will be trained more
+quickly</strong> than standard SGD (or competing methods). <a class="footnote-reference brackets" href="#flops" id="id1">1</a></p>
+<p>More detail can be found in the <a class="reference internal" href="math.html#sec-math"><span class="std std-ref">Mathematical underpinnings</span></a> and <a class="reference internal" href="experiments.html#sec-exps"><span class="std std-ref">Experiments</span></a> sections.</p>
 <div class="toctree-wrapper compound">
 <p class="caption"><span class="caption-text">Contents:</span></p>
 <ul>
@@ -199,6 +210,13 @@ quickly</strong>. More detail can be found in the <a class="reference internal" 
 <li><p><a class="reference internal" href="py-modindex.html"><span class="std std-ref">Module Index</span></a></p></li>
 <li><p><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></p></li>
 </ul>
+<dl class="footnote brackets">
+<dt class="label" id="flops"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dd><p>Don’t worry – if the distributed setup is not available, this
+package will not require more floating point operations than
+standard SGD.</p>
+</dd>
+</dl>
 </div>
 
 
