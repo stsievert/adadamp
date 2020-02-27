@@ -8,7 +8,6 @@ import torch.nn as nn
 import torch
 
 from .damping import AdaDamp, GeoDamp, PadaDamp, BaseDamper, ConvergenceError
-from .dist import gradient
 
 Number = Union[int, float]
 

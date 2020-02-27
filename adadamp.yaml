@@ -14,8 +14,11 @@ dependencies:
   - scipy
   - torchvision
   - pytest
+  - python-snappy
   - pip:
     - sphinx
     - numpydoc
+    - fastparquet
+    - pyarrow
 prefix: /opt/conda
 
