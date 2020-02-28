@@ -26,6 +26,7 @@ def run(
     args=None,
     test_freq: Optional[Number] = None,
     train_stats: bool = True,
+    verbose : bool = False,
 ):
     data = []
     train_data = []
@@ -36,25 +37,26 @@ def run(
             train_stats = test(dataset=train_set, prefix="train", **test_kwargs)
         test_stats = test(dataset=test_set, prefix="test", **test_kwargs)
         data.append({**args, **opt.meta, **train_stats, **test_stats})
-        _s = {
-            k: v
-            for k, v in data[-1].items()
-            if k in data[-1]
-            and k
-            in [
-                "damper",
-                "lr_",
-                "model_updates",
-                "batch_size",
-                "train_loss",
-                "best_train_loss",
-                "epochs",
-                "damping",
-                "test_accuracy",
-                "train_accuracy",
-            ]
-        }
-        pprint(_s)
+        if verbose:
+            _s = {
+                k: v
+                for k, v in data[-1].items()
+                if k in data[-1]
+                and k
+                in [
+                    "damper",
+                    "lr_",
+                    "model_updates",
+                    "batch_size",
+                    "train_loss",
+                    "best_train_loss",
+                    "epochs",
+                    "damping",
+                    "test_accuracy",
+                    "train_accuracy",
+                ]
+            }
+            pprint(_s)
         epoch = data[-1]["epochs"]
         if epoch >= args["epochs"]:
             break
