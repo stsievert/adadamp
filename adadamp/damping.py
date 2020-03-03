@@ -121,7 +121,9 @@ class BaseDamper:
 
         batch_loss, num_examples = self._step(**kwargs)
         if batch_loss >= 1e6:
-            raise ConvergenceError(f"The model is diverging; batch_loss={batch_loss:0.2e}")
+            raise ConvergenceError(
+                f"The model is diverging; batch_loss={batch_loss:0.2e}"
+            )
 
         self._meta["model_updates"] += 1
         self._meta["time"] = time()
@@ -189,13 +191,30 @@ class BaseDamper:
 
         data, target = data.to(self._device), target.to(self._device)
         self._opt.zero_grad()
-        output = self._model(data)
-        loss = self._loss(output, target, reduction="sum")
-        loss *= 1 / len(data)
-        loss.backward()
+
+        if bs <= 1024:
+            output = self._model(data)
+            loss = self._loss(output, target, reduction="sum")
+            loss /= len(data)
+            loss.backward()
+            num_examples = len(data)
+            loss_ret = loss.item()
+        else:
+            num_examples = 0
+            Data = torch.split(data, 1024)
+            Target = torch.split(target, 1024)
+            loss = 0
+            for data, target in zip(Data, Target):
+                output = self._model(data)
+                loss += self._loss(output, target, reduction="sum")
+                num_examples += len(data)
+            loss /= num_examples
+            loss.backward()
+            loss_ret = loss.item()
+
         self._opt.step(**kwargs)
         self._meta["_step_time"] = time() - start
-        return loss.item(), len(data)
+        return loss_ret, num_examples
 
     def _set_lr(self, lr):
         for group in self._opt.param_groups:

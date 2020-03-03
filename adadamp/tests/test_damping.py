@@ -42,6 +42,14 @@ def dataset():
         torch.from_numpy(X.astype("float32")), torch.from_numpy(y.astype("int64"))
     )
 
+@pytest.fixture
+def large_dataset():
+    X, y = make_classification(
+        n_features=20, n_samples=3000, n_classes=10, n_informative=10
+    )
+    return TensorDataset(
+        torch.from_numpy(X.astype("float32")), torch.from_numpy(y.astype("int64"))
+    )
 
 @pytest.fixture
 def model():
@@ -82,6 +90,24 @@ def test_geodamp(model, dataset):
     counts = df.damping.value_counts()
     assert set(counts.index.astype(int)) == {1, 2, 4, 8}
     assert np.allclose(counts.unique(), 4)
+
+
+def test_large_batch_size(model, large_dataset):
+    _opt = optim.Adadelta(model.parameters(), lr=1)
+    opt = BaseDamper(model, large_dataset, _opt, initial_batch_size=1024)
+    data: List[Dict[str, Any]] = []
+    data2: List[Dict[str, Any]] = []
+    for epoch in range(1, 16 + 1):
+        model, opt, meta, _ = experiment.train(model, opt)
+        data.append(opt.meta)
+        data2.append(meta)
+    df = pd.DataFrame(data)
+
+    # Make sure the loss is decreasing
+    assert df.batch_loss.diff().median() < -0.01
+    assert df.batch_loss.diff().mean() < -0.01
+    assert 2.25 < df.loc[0, "batch_loss"]
+    assert df.loc[15, "batch_loss"] < 2.06
 
 
 def test_padadamp(model, dataset):
