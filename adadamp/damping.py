@@ -203,14 +203,17 @@ class BaseDamper:
             num_examples = 0
             Data = torch.split(data, 1024)
             Target = torch.split(target, 1024)
-            loss = 0
+            loss_sum = 0
             for data, target in zip(Data, Target):
                 output = self._model(data)
-                loss += self._loss(output, target, reduction="sum")
+                loss = self._loss(output, target, reduction="sum")
+                loss.backward()
+
+                loss_sum += loss.item()
                 num_examples += len(data)
-            loss /= num_examples
-            loss.backward()
-            loss_ret = loss.item()
+            for _p in self._model.parameters():
+                _p.grad /= num_examples
+            loss_ret = loss_sum
 
         self._opt.step(**kwargs)
         self._meta["_step_time"] = time() - start
