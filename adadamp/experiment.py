@@ -26,7 +26,7 @@ def run(
     args=None,
     test_freq: Optional[Number] = None,
     train_stats: bool = True,
-    verbose : bool = False,
+    verbose: bool = False,
 ):
     data = []
     train_data = []

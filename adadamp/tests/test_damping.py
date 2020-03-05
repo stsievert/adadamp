@@ -12,9 +12,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
-from torch.utils.data import TensorDataset
+from torch.utils.data import TensorDataset, random_split
 
-from adadamp import BaseDamper, GeoDamp, AdaDamp, PadaDamp
+from adadamp import BaseDamper, GeoDamp, AdaDamp, PadaDamp, GradientDescent
 import adadamp.experiment as experiment
 
 
@@ -42,6 +42,44 @@ def dataset():
         torch.from_numpy(X.astype("float32")), torch.from_numpy(y.astype("int64"))
     )
 
+
+@pytest.fixture
+def images():
+    d = datasets.MNIST(
+        "_traindata/mnist/",
+        train=True,
+        download=True,
+        transform=transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+        ),
+    )
+    n = 1000
+    d, _ = random_split(d, [n, len(d) - n])
+    return d
+
+class MNISTNet(nn.Module):
+    def __init__(self):
+        super(MNISTNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 16, 3, 1)
+        self.conv2 = nn.Conv2d(16, 16, 3, 1)
+        self.fc1 = nn.Linear(16 * 12 * 12, 64)
+        self.fc2 = nn.Linear(64, 10)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+        x = torch.flatten(x, 1)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        output = F.log_softmax(x, dim=1)
+        return output
+
+
+
 @pytest.fixture
 def large_dataset():
     X, y = make_classification(
@@ -51,13 +89,13 @@ def large_dataset():
         torch.from_numpy(X.astype("float32")), torch.from_numpy(y.astype("int64"))
     )
 
+
 @pytest.fixture
 def model():
     return Net().to("cpu")
 
 
-def test_basics(model, dataset):
-    epochs = 14
+def test_basics(model, dataset, epochs=14):
     optimizer = optim.Adadelta(model.parameters(), lr=1)
     opt = BaseDamper(model, dataset, optimizer, initial_batch_size=8)
 
@@ -72,6 +110,11 @@ def test_basics(model, dataset):
     eg_per_epoch = df.num_examples.diff().iloc[1:]
     len_dataset = df.len_dataset.iloc[1:]
     assert all((eg_per_epoch - len_dataset) <= df.batch_size.iloc[1:])
+
+
+def test_basics_imgs(images):
+    model = MNISTNet()
+    test_basics(model, images, epochs=2)
 
 
 def test_geodamp(model, dataset):
@@ -137,6 +180,20 @@ def test_adadamp(model, dataset):
     bs = df.batch_size.values
     assert (bs == bs_hat).all()
 
+def test_gradient_descent(model, dataset):
+    init_bs = 8
+    _opt = optim.SGD(model.parameters(), lr=0.500)
+    opt = GradientDescent(model, dataset, _opt)
+    data: List[Dict[str, Any]] = []
+    initial_loss = opt._get_loss()
+    for epoch in range(5):
+        model, opt, meta, train_data = experiment.train(model, opt)
+        data += train_data
+    df = pd.DataFrame(data)
+    assert (df.batch_loss.diff().dropna() < 0).all()
+    assert (df.len_dataset == df.batch_size).all()
+    assert np.allclose(df.epochs.diff().dropna(), 1)
+
 
 def test_avg_loss(model, dataset):
     """
@@ -195,5 +252,6 @@ def test_get_params(model, dataset):
         "epochs",
         "damper",
         "opt_name",
+        "seed",
     }
     assert set(opt.meta.keys()) == param_keys.union(meta_keys)
