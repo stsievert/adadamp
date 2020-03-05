@@ -64,7 +64,7 @@ class BaseDamper:
         device: str = "cpu",
         max_batch_size: Optional[Number] = None,
         best_train_loss: Optional[float] = None,
-        seed: Optional[int] = None,
+        random_state: Optional[int] = None,
         **kwargs,
     ):
         # Public
@@ -80,8 +80,8 @@ class BaseDamper:
         self._initial_lr = self._get_lr()
         self._dataset = dataset
         self._device = torch.device(device)
-        self.seed = seed
-        self._rng = np.random.RandomState(seed=seed)
+        self.random_state = random_state
+        self._rng = np.random.RandomState(seed=random_state)
         self._batch_size = initial_batch_size
 
         self._meta: Dict[str, Any] = {
