@@ -80,6 +80,7 @@ class BaseDamper:
         self._initial_lr = self._get_lr()
         self._dataset = dataset
         self._device = torch.device(device)
+        self._model.to(self._device)
         self.random_state = random_state
         self._rng = np.random.RandomState(seed=random_state)
         self._batch_size = initial_batch_size
@@ -119,7 +120,8 @@ class BaseDamper:
             self._batch_size = max_bs
 
         batch_loss, num_examples = self._step(**kwargs)
-        if batch_loss >= 1e6:
+        epochs = self._meta["num_examples"] / self._meta["len_dataset"]
+        if batch_loss >= 1e6 and epochs > 1:
             raise ConvergenceError(
                 f"The model is diverging; batch_loss={batch_loss:0.2e}"
             )
@@ -189,6 +191,7 @@ class BaseDamper:
             Target = torch.split(target, 1024)
             loss_sum = 0
             for data, target in zip(Data, Target):
+                data, target = data.to(self._device), target.to(self._device)
                 output = self._model(data)
                 loss = self._loss(output, target, reduction="sum")
                 loss.backward()
@@ -197,7 +200,7 @@ class BaseDamper:
                 num_examples += len(data)
             for _p in self._model.parameters():
                 _p.grad /= num_examples
-            loss_ret = loss_sum
+            loss_ret = loss_sum / num_examples
 
         self._opt.step(**kwargs)
         self._meta["_step_time"] = time() - start
