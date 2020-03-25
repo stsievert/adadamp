@@ -44,12 +44,16 @@ def test_basic_dist(dataset, model):
     loss = F.nll_loss
     data_loader = torch.utils.data.DataLoader(train, batch_size=99)
 
-    _grads = (gradient(model, input, output, loss) for input, output in data_loader)
+    _grads = (
+        gradient(input, output, model=model, loss=loss) for input, output in data_loader
+    )
     grads = toolz.merge_with(sum, _grads)
 
     n_data = grads.pop("_num_data")
     assert n_data == 1000 == len(train)
-    grad_params = sum(v.nelement() for v in grads.values())
+
+    _grads = [v for v in grads.values() if isinstance(v, torch.Tensor)]
+    grad_params = sum(v.nelement() for v in _grads)
     assert grad_params == model_params
-    flat_grad = torch.cat([v.view(-1) for v in grads.values()])
+    flat_grad = torch.cat([v.view(-1) for v in _grads])
     assert not np.isinf(flat_grad.abs().max().numpy())

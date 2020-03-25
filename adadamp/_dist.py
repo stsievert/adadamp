@@ -1,16 +1,21 @@
-from typing import Callable, Dict, Any, Union
+from typing import Callable, Dict, Any, Union, Optional, List
 
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+import numpy as np
+
+IntArray = Union[List[int], np.ndarray, torch.Tensor]
 
 
 def gradient(
+    inputs,
+    targets,
+    *,
     model: nn.Module,
-    input,
-    target,
     loss: Callable,
     device: torch.device = torch.device("cpu"),
+    idx: Optional[IntArray] = None,
 ) -> Dict[str, Union[torch.Tensor, int]]:
     r"""
     Compute the model gradient for the function ``loss``.
@@ -19,7 +24,15 @@ def gradient(
     ----------
     model : nn.Module
         PyTorch model to eval
-    data : PyTorch DataSet
+
+    inputs : torch.Tensor
+        Input array to model
+
+    targets : torch.Tensor
+        Target output for model. The gradient is computed with respect to this.
+
+    device : torch.device
+
     loss : Callabale
         PyTorch loss. Should return the loss with
 
@@ -27,12 +40,14 @@ def gradient(
 
            loss(output, out_, reduction="sum")
 
-    device : PyTorch device (optional)
+    idx : Optional[IntArray], optional
+        The indices to compute the gradient over.
 
     Returns
     -------
     grad : Dict[str, Union[Tensor, int]]
-        Gradients. This dictionary all keys in model.named_parameters.keys().
+        Gradient. This dictionary has all the keys in
+        ``model.named_parameters.keys()``.
 
     Notes
     -----
@@ -42,10 +57,13 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
-    output = model(input)
-    loss = loss(output, target, reduction="sum")
+    if idx is not None:
+        inputs = inputs[idx]
+        targets = targets[idx]
+    inputs, targets = inputs.to(device), targets.to(device)
+
+    outputs = model(inputs)
+    loss = loss(outputs, targets, reduction="sum")
     loss.backward()
-    ret = {k: v.grad for k, v in model.named_parameters()}
-    ret["_num_data"] = len(output)
-    ret["_loss"] = loss.item()
-    return ret
+    grads = {k: v.grad for k, v in model.named_parameters()}
+    return {"_num_data": len(outputs), "_loss": loss.item(), **grads}
