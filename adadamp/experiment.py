@@ -26,12 +26,13 @@ def run(
     args=None,
     test_freq: Optional[Number] = None,
     train_stats: bool = True,
-    verbose : bool = False,
+    verbose: bool = False,
+    device: str = "cpu",
 ):
     data = []
     train_data = []
     for k in itertools.count():
-        test_kwargs = dict(model=model, loss=opt._loss)
+        test_kwargs = dict(model=model, loss=opt._loss, device=device)
         train_stats = {}
         if train_stats:
             train_stats = test(dataset=train_set, prefix="train", **test_kwargs)
@@ -128,22 +129,24 @@ def train(
     meta = {
         "_epochs": epochs,
         "_num_examples": num_examples_so_far,
-        "_time": time() - _loop_start,
+        "_train_time": time() - _loop_start,
     }
     return model, opt, meta, data
 
 
 def test(
-    model=None, loss=None, dataset=None, use_cuda=False, batch_size=1000, prefix=""
+    model=None, loss=None, dataset=None, device: str="cpu", batch_size=1000, prefix=""
 ):
-    def _test():
+    assert isinstance(device, str)
+    def _test(model):
         test_loss = 0
         correct = 0
-        kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
+        kwargs = {"num_workers": 1, "pin_memory": True} if "cuda" in device else {}
         loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, **kwargs)
-        device = torch.device("cuda" if use_cuda else "cpu")
+        _device = torch.device(device)
+        model = model.to(_device)
         for data, target in loader:
-            data, target = data.to(device), target.to(device)
+            data, target = data.to(_device), target.to(_device)
             output = model(data)
             test_loss += loss(
                 output, target, reduction="sum"
@@ -162,6 +165,6 @@ def test(
     ret = {"loss": 0}
     model.eval()
     with torch.no_grad():
-        ret = _test()
-        ret.update({"batch_size": batch_size, "use_cuda": use_cuda, "prefix": prefix})
+        ret = _test(model)
+        ret.update({"batch_size": batch_size, "device": device, "prefix": prefix})
     return {f"{prefix}_{k}": v for k, v in ret.items()}

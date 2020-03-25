@@ -6,7 +6,7 @@ from time import time
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 from torch.utils.data import BatchSampler, RandomSampler, SequentialSampler
 from torch.optim import Optimizer
 import torch.nn.functional as F
@@ -44,8 +44,6 @@ class BaseDamper:
         value, the learning rate is decayed by an appropriate amount.
         If None, will automatically be set to be the size of the
         dataset. Setting to NaN will result in no maximum batch size.
-    kwargs : dict
-        Arguments to pass to the underlying torch.DataLoader
 
 
     Notes
@@ -66,6 +64,7 @@ class BaseDamper:
         device: str = "cpu",
         max_batch_size: Optional[Number] = None,
         best_train_loss: Optional[float] = None,
+        random_state: Optional[int] = None,
         **kwargs,
     ):
         # Public
@@ -81,9 +80,10 @@ class BaseDamper:
         self._initial_lr = self._get_lr()
         self._dataset = dataset
         self._device = torch.device(device)
-        sampler = RandomSampler(dataset, replacement=True)
-        self._loader = DataLoader(dataset, sampler=sampler, drop_last=True, **kwargs,)
-        self._data_iter = iter(self._loader)
+        self._model.to(self._device)
+        self.random_state = random_state
+        self._rng = np.random.RandomState(seed=random_state)
+        self._batch_size = initial_batch_size
 
         self._meta: Dict[str, Any] = {
             "model_updates": 0,
@@ -110,17 +110,18 @@ class BaseDamper:
         start = time()
         damping = self.damping()
         self._meta["damping_time"] = time() - start
-        self._loader.batch_sampler.batch_size = int(damping)
+        self._batch_size = int(damping)
 
         # Is the batch size too large? If so, decay the learning rate
-        current_bs = self._loader.batch_sampler.batch_size
+        current_bs = self._batch_size
         max_bs = self.max_batch_size
         if max_bs is not None and current_bs >= max_bs:
             self._set_lr(self._initial_lr * max_bs / current_bs)
-            self._loader.batch_sampler.batch_size = max_bs
+            self._batch_size = max_bs
 
         batch_loss, num_examples = self._step(**kwargs)
-        if batch_loss >= 1e6:
+        epochs = self._meta["num_examples"] / self._meta["len_dataset"]
+        if batch_loss >= 1e6 and epochs > 1:
             raise ConvergenceError(
                 f"The model is diverging; batch_loss={batch_loss:0.2e}"
             )
@@ -133,7 +134,7 @@ class BaseDamper:
         self._meta["num_examples"] += num_examples
         self._meta["batch_loss"] = batch_loss
         self._meta["damping"] = damping
-        self._meta["batch_size"] = self._loader.batch_sampler.batch_size
+        self._meta["batch_size"] = self._batch_size
 
     def damping(self) -> int:
         """Determines how strongly noise in stochastic gradient
@@ -155,39 +156,24 @@ class BaseDamper:
         """
         return self.initial_batch_size
 
+    def _get_example_indices(self, batch_size=None):
+        if batch_size is None:
+            batch_size = self._batch_size
+        return self._rng.choice(len(self._dataset), size=batch_size)
+
     def _get_batch(self, batch_size=None):
-        try:
-            data, target = next(self._data_iter)
-        except StopIteration:
-            self._data_iter = iter(self._loader)
-            if batch_size is not None:
-                original_bs = copy(self._loader.batch_sampler.batch_size)
-                self._loader.batch_sampler.batch_size = batch_size
-            data, target = next(self._data_iter)
-        assert self._loader.batch_sampler.batch_size > 0
-        if batch_size is not None:
-            self._loader.batch_sampler.batch_size = original_bs
-        return data, target
+        idx = self._get_example_indices()
+        data = [self._dataset[i][0] for i in idx]
+        data = [d.reshape(-1, *d.size()) for d in data]
+        target = [self._dataset[i][1] for i in idx]
+        return torch.cat(data), torch.tensor(target)
 
     def _step(self, **kwargs):
         start = time()
 
-        bs = copy(self._loader.batch_sampler.batch_size)
-        if bs <= self._meta["len_dataset"]:
-            data, target = self._get_batch()
-            self._sizes = {"data": data.size(), "target": target.size()}
-        else:
-            data, target = self._get_batch(batch_size=self._meta["len_dataset"])
-            while True:
-                d, t = self._get_batch(
-                    batch_size=min(bs // 10, self._meta["len_dataset"])
-                )
-                data = torch.cat((data, d))  # , out=data)
-                target = torch.cat((target, t))  # , out=target)
-                if len(data) >= bs:
-                    break
-            bs2 = copy(self._loader.batch_sampler.batch_size)
-            assert bs == bs2
+        bs = self._batch_size
+        data, target = self._get_batch()
+        self._sizes = {"data": data.size(), "target": target.size()}
 
         data, target = data.to(self._device), target.to(self._device)
         self._opt.zero_grad()
@@ -205,6 +191,7 @@ class BaseDamper:
             Target = torch.split(target, 1024)
             loss_sum = 0
             for data, target in zip(Data, Target):
+                data, target = data.to(self._device), target.to(self._device)
                 output = self._model(data)
                 loss = self._loss(output, target, reduction="sum")
                 loss.backward()
@@ -213,7 +200,7 @@ class BaseDamper:
                 num_examples += len(data)
             for _p in self._model.parameters():
                 _p.grad /= num_examples
-            loss_ret = loss_sum
+            loss_ret = loss_sum / num_examples
 
         self._opt.step(**kwargs)
         self._meta["_step_time"] = time() - start
@@ -423,9 +410,9 @@ class GradientDescent(BaseDamper):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "gd"
-        sampler = SequentialSampler(self._dataset)
-        self._loader = DataLoader(self._dataset, sampler=sampler)
-        self._data_iter = iter(self._loader)
+
+    def _get_example_indices(self, batch_size=None):
+        return list(range(len(self._dataset)))
 
     def damping(self) -> int:
         """ """
