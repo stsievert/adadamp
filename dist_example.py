@@ -52,6 +52,10 @@ def train(
     epoch: int,
     verbose: Optional[Union[bool, float]] = 0.1,
 ) -> Dict[str, Union[int, float]]:
+    # The model will be stored on the master node. The workers will be assigned
+    # to calculate the gradients. When they return the gradients, the master
+    # node will iterate on the model, and repeat the loop (again asking workers
+    # to compute the gradient).
     model.train()
     rng = np.random.RandomState(abs(hash(str(epoch))) % (2 ** 31))
 
@@ -81,6 +85,9 @@ def train(
         idx = rng.choice(len(train_set), size=batch_size)
         worker_idxs = np.array_split(idx, n_workers)
 
+        # Distribute the computation of the gradient. In practice this will
+        # mean (say) 4 GPUs to accelerate the gradient computation. Right now
+        # for ease it's a small network that doesn't need much acceleration.
         grads = [
             gradient(
                 inputs,
@@ -92,25 +99,27 @@ def train(
             )
             for worker_idx in worker_idxs
         ]
+
+        # The gradients have been calculated. Now, let's make sure
+        # ``optimizer`` can see the gradients.
         optimizer.zero_grad()
         num_data = sum(info["_num_data"] for info in grads)
         assert num_data == batch_size
         for name, param in model.named_parameters():
             grad = sum(grad[name] for grad in grads)
             param.grad = grad / num_data
-        _a = sum(p.grad.abs().sum().item() for p in model.parameters())
 
-        num_data = sum(grad["_num_data"] for grad in grads)
-        loss_sum = sum(grad["_loss"] for grad in grads)
-        loss_avg = loss_sum / num_data
-
+        # Take an optimization step
         optimizer.step()
 
+        # From here to the end of the loop is metadata tracking: how many
+        # updates/epochs (or passes through the data), what's the loss, etc
         model._updates += 1
         model._num_eg_processed += num_data
 
         epochs = model._num_eg_processed / len(train_set)
         epochs_since_print = epochs - (_num_eg_print / len(targets))
+        loss_avg = sum(grad["_loss"] for grad in grads) / num_data
         if _num_eg_print == -1 or epochs_since_print > verbose:
             _num_eg_print = model._num_eg_processed
             print(
@@ -123,29 +132,8 @@ def train(
     return {"num_data": model._num_eg_processed, "batch_loss": loss_avg}
 
 
-def _train(args, model, device, train_loader, optimizer, epoch):
-    model.train()
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        output = model(data)
-        loss = F.nll_loss(output, target, reduction="mean")
-        loss.backward()
-        optimizer.step()
-        #  breakpoint()
-        if batch_idx % args.log_interval == 0:
-            print(
-                "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-                    epoch,
-                    batch_idx * len(data),
-                    len(train_loader.dataset),
-                    100.0 * batch_idx / len(train_loader),
-                    loss.item(),
-                )
-            )
-
-
 def test(args, model, device, test_loader, verbose=True):
+    # Small modification of PyTorch's MNIST example
     model.eval()
     test_loss = 0
     correct = 0
