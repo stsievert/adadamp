@@ -10,6 +10,7 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 import numpy as np
+from distributed import Client
 
 from adadamp._dist import gradient
 
@@ -68,6 +69,8 @@ def train(
     _num_eg_print = -1
     _start_eg = copy(model._num_eg_processed)
 
+    client = Client()
+
     while True:
         # Let's set the number of workers to be static for now.
         # This should grow as this optimization proceeds, either
@@ -89,7 +92,8 @@ def train(
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
         grads = [
-            gradient(
+            client.submit(
+                gradient,
                 inputs,
                 targets,
                 model=deepcopy(model),
@@ -99,6 +103,7 @@ def train(
             )
             for worker_idx in worker_idxs
         ]
+        grads = client.gather(grads)
 
         # The gradients have been calculated. Now, let's make sure
         # ``optimizer`` can see the gradients.
