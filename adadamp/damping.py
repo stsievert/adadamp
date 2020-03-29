@@ -44,7 +44,11 @@ class BaseDamper:
         value, the learning rate is decayed by an appropriate amount.
         If None, will automatically be set to be the size of the
         dataset. Setting to NaN will result in no maximum batch size.
-
+    dwell : int, default=20
+        How many model updates should the batch size be held constant?
+        This is similar to the "relaxation time" parameter in simulated
+        annealing. Setting ``dwell=1`` will mean the batch size will be
+        evaluated for every model update.
 
     Notes
     -----
@@ -65,6 +69,7 @@ class BaseDamper:
         max_batch_size: Optional[Number] = None,
         best_train_loss: Optional[float] = None,
         random_state: Optional[int] = None,
+        dwell: int=20,
         **kwargs,
     ):
         # Public
@@ -72,6 +77,7 @@ class BaseDamper:
         if max_batch_size is None:
             max_batch_size = len(dataset)
         self.max_batch_size = max_batch_size
+        self.dwell = dwell
 
         # Private
         self._model = model
@@ -108,9 +114,15 @@ class BaseDamper:
             (e.g., :class:`torch.optim.AdaGrad`)
         """
         start = time()
-        damping = self.damping()
-        self._meta["damping_time"] = time() - start
-        self._batch_size = int(damping)
+        mu = self._meta["model_updates"]
+
+        if self._meta["model_updates"] % self.dwell == 0:
+            damping = self.damping()
+            self._meta["damping_time"] = time() - start
+            self._batch_size = int(damping)
+        else:
+            damping = self._meta["damping"]
+
 
         # Is the batch size too large? If so, decay the learning rate
         current_bs = self._batch_size
@@ -133,7 +145,6 @@ class BaseDamper:
         self._meta["lr_"] = self._get_lr()
         self._meta["num_examples"] += num_examples
         self._meta["batch_loss"] = batch_loss
-        self._meta["damping"] = damping
         self._meta["batch_size"] = self._batch_size
 
     def damping(self) -> int:
