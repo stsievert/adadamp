@@ -7,9 +7,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import sys
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 import numpy as np
+import time
 from distributed import Client
 
 from adadamp._dist import gradient
@@ -70,6 +72,9 @@ def train(
     _start_eg = copy(model._num_eg_processed)
 
     client = Client()
+    future_inputs = client.scatter(inputs)
+    future_targets = client.scatter(targets)
+    future_device = client.scatter(device)
 
     while True:
         # Let's set the number of workers to be static for now.
@@ -91,11 +96,12 @@ def train(
         # Distribute the computation of the gradient. In practice this will
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
+        start = time.time()
         grads = [
             client.submit(
                 gradient,
-                inputs,
-                targets,
+                future_inputs,
+                future_targets,
                 model=deepcopy(model),
                 loss=F.nll_loss,
                 device=device,
@@ -104,6 +110,9 @@ def train(
             for worker_idx in worker_idxs
         ]
         grads = client.gather(grads)
+        print("Computed gradients in {:.5f} seconds".format(time.time() - start))
+        # still taking 3+ seconds to get gradients. I assume this is because I dwas not scattering
+        # the model, but I tried for a while and could not get that to work either
 
         # The gradients have been calculated. Now, let's make sure
         # ``optimizer`` can see the gradients.
