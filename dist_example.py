@@ -16,6 +16,14 @@ from distributed import Client
 
 from adadamp._dist import gradient
 
+"""
+  - Look at dask scaling number of workers to grow with batch size
+  (use example whre batch size grows by 1 each iteration)
+  - Look at what scatter does, make sure it is giving all workers all data
+
+  Goal: Give every worker all the data, compute gradients for these indivies for different
+        workers
+"""
 
 class Net(nn.Module):
     def __init__(self):
@@ -71,15 +79,11 @@ def train(
     _num_eg_print = -1
     _start_eg = copy(model._num_eg_processed)
 
+    # using dasks built in serializer causes issue
     client = Client(serializers=['pickle'])
     future_inputs = client.scatter(inputs)
     future_targets = client.scatter(targets)
     future_device = client.scatter(device)
-
-    # scatter model before calculating gradient.
-    # dask should have similar or better performance
-    #
-    # can test adding more convolutions
 
     while True:
         # Let's set the number of workers to be static for now.
@@ -102,7 +106,6 @@ def train(
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
 
-        # scatter the model each iteration, this was the root of that pesky performance issue
         future_client = client.scatter(copy(model))
         start = time.time()
         grads = [
@@ -179,6 +182,31 @@ def test(args, model, device, test_loader, verbose=True):
         print(msg.format(test_loss, 100.0 * acc))
     return {"acc": acc, "loss": test_loss}
 
+def load_data(path):
+    """
+    Loads train and test data
+    """
+    train_set = datasets.MNIST(
+        path, train=True, download=True, transform=transform,
+    )
+    # For quicker debugging uncomment this line
+    #  train_set, _ = torch.utils.data.random_split(train_set, [2000, len(train_set) - 2000])
+
+    _train_loader = torch.utils.data.DataLoader(
+        train_set, batch_size=10_000, shuffle=False, **kwargs
+    )
+
+    # _train_loader's shuffle=False is importnat for these lines, otherwise
+    # we're looping twice over the data, and it gets shuffled in- the meantime
+    inputs = torch.cat([input.clone() for input, _ in _train_loader])
+    targets = torch.cat([target.clone() for _, target in _train_loader])
+
+    test_set = datasets.MNIST(path, train=False, transform=transform)
+    test_loader = torch.utils.data.DataLoader(
+        test_set, batch_size=args.test_batch_size, shuffle=True, **kwargs
+    )
+    
+    return test_set, train_set, inputs, targets, test_loader
 
 if __name__ == "__main__":
     # Training settings
@@ -203,25 +231,13 @@ if __name__ == "__main__":
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
     )
-    train_set = datasets.MNIST(
-        "../data", train=True, download=True, transform=transform,
-    )
-    # For quicker debugging uncomment this line
-    #  train_set, _ = torch.utils.data.random_split(train_set, [2000, len(train_set) - 2000])
 
-    _train_loader = torch.utils.data.DataLoader(
-        train_set, batch_size=10_000, shuffle=False, **kwargs
-    )
+    # track how long to load data
+    start = time.time()
+    test_set, train_set, inputs, targets, test_loader = load_data("../data")
 
-    # _train_loader's shuffle=False is importnat for these lines, otherwise
-    # we're looping twice over the data, and it gets shuffled in- the meantime
-    inputs = torch.cat([input.clone() for input, _ in _train_loader])
-    targets = torch.cat([target.clone() for _, target in _train_loader])
-
-    test_set = datasets.MNIST("../data", train=False, transform=transform)
-    test_loader = torch.utils.data.DataLoader(
-        test_set, batch_size=args.test_batch_size, shuffle=True, **kwargs
-    )
+    # output load time
+    print("Loaded data in {:.2f} seconds".format(time.time() - start))
 
     model = Net().to(device)
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
