@@ -66,7 +66,7 @@ class BaseDamper:
         loss: Callable = F.nll_loss,
         initial_batch_size: int = 1,
         device: str = "cpu",
-        max_batch_size: Optional[Number] = None,
+        max_batch_size: Optional[int] = None,
         best_train_loss: Optional[float] = None,
         random_state: Optional[int] = None,
         dwell: int=20,
@@ -278,6 +278,7 @@ class AdaDamp(BaseDamper):
         self.approx_loss = approx_loss
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "adadamp"
+        self._meta["_last_batch_losses"] = [None] * 10
 
     def damping(self) -> int:
         r"""Adaptively damp the noise depending on the current loss with
@@ -295,7 +296,14 @@ class AdaDamp(BaseDamper):
         if not self.approx_loss:
             loss = self._get_loss()
         else:
-            loss = self._meta["batch_loss"]
+            _loss = self._meta["batch_loss"]
+            _blosses = self._meta["_last_batch_losses"]
+            self._meta["_last_batch_losses"] = [_loss, *_blosses[:-1]]
+            if any(_ is None for _ in self._meta["_last_batch_losses"]):
+                loss = _loss
+            else:
+                losses = self._meta["_last_batch_losses"]
+                loss = np.mean(losses)
             if loss is None or self._meta["batch_size"] <= 25:
                 loss = self._get_loss(frac=0.1)
             if loss >= 1e6:

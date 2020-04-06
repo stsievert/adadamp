@@ -37,7 +37,9 @@ def run(
         if train_stats:
             train_stats = test(dataset=train_set, prefix="train", **test_kwargs)
         test_stats = test(dataset=test_set, prefix="test", **test_kwargs)
-        data.append({**args, **opt.meta, **train_stats, **test_stats})
+        data.append(
+            {"epoch_time": time(), **args, **opt.meta, **train_stats, **test_stats}
+        )
         if verbose:
             _s = {
                 k: v
@@ -59,6 +61,7 @@ def run(
             }
             pprint(_s)
         epoch = data[-1]["epochs"]
+        mu = data[-1]["model_updates"]
         if epoch >= args["epochs"]:
             break
         try:
@@ -135,9 +138,10 @@ def train(
 
 
 def test(
-    model=None, loss=None, dataset=None, device: str="cpu", batch_size=1000, prefix=""
+    model=None, loss=None, dataset=None, device: str = "cpu", batch_size=1000, prefix=""
 ):
     assert isinstance(device, str)
+
     def _test(model):
         test_loss = 0
         correct = 0

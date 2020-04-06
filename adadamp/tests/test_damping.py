@@ -172,10 +172,18 @@ def test_padadamp(model, dataset):
     assert (df.damping == df.model_updates + 1).all()
 
 
-def test_adadamp(model, dataset):
+@pytest.mark.parametrize("approx_loss", [True, False])
+def test_adadamp(model, dataset, approx_loss):
     init_bs = 8
     _opt = optim.SGD(model.parameters(), lr=0.500)
-    opt = AdaDamp(model, dataset, _opt, initial_batch_size=init_bs, dwell=1)
+    opt = AdaDamp(
+        model,
+        dataset,
+        _opt,
+        initial_batch_size=init_bs,
+        dwell=1,
+        approx_loss=approx_loss,
+    )
     data: List[Dict[str, Any]] = []
     initial_loss = opt._get_loss()
     for epoch in range(5):
@@ -187,6 +195,10 @@ def test_adadamp(model, dataset):
     bs_hat = bs_hat.values.astype(int) + 1
     bs = df.batch_size.values
     assert (bs == bs_hat).all()
+    assert (df._last_batch_losses.apply(len) == 10).all()
+    if approx_loss:
+        has_null = df._last_batch_losses.apply(lambda x: any(_ is None for _ in x))
+        assert (~has_null).iloc[10:].all()
 
 
 def test_gradient_descent(model, dataset):
