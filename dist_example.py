@@ -71,10 +71,15 @@ def train(
     _num_eg_print = -1
     _start_eg = copy(model._num_eg_processed)
 
-    client = Client()
+    client = Client(serializers=['pickle'])
     future_inputs = client.scatter(inputs)
     future_targets = client.scatter(targets)
     future_device = client.scatter(device)
+
+    # scatter model before calculating gradient.
+    # dask should have similar or better performance
+    #
+    # can test adding more convolutions
 
     while True:
         # Let's set the number of workers to be static for now.
@@ -96,13 +101,16 @@ def train(
         # Distribute the computation of the gradient. In practice this will
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
+
+        # scatter the model each iteration, this was the root of that pesky performance issue
+        future_client = client.scatter(copy(model))
         start = time.time()
         grads = [
             client.submit(
                 gradient,
                 future_inputs,
                 future_targets,
-                model=deepcopy(model),
+                model=future_client,
                 loss=F.nll_loss,
                 device=device,
                 idx=worker_idx,
