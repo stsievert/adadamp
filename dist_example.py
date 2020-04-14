@@ -12,14 +12,16 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 import numpy as np
 import time
-from distributed import Client
+from distributed import Client, LocalCluster
 
 from adadamp._dist import gradient
 
 """
   - Look at dask scaling number of workers to grow with batch size
   (use example whre batch size grows by 1 each iteration)
-  - Look at what scatter does, make sure it is giving all workers all data
+  - Look at improving speed of train function by having it load data in train
+    - Load before train and pass futures to the train function 
+    - Pass a client to train and pass it futures
 
   Goal: Give every worker all the data, compute gradients for these indivies for different
         workers
@@ -79,8 +81,23 @@ def train(
     _num_eg_print = -1
     _start_eg = copy(model._num_eg_processed)
 
+    # this value will be scaled 
+    n_workers = 4
+
+    # we will increase the number of workers when each is computing more than
+    # `scale_threashold` gradients
+    # scale factor determines by how much we will the number of workers upon reaching the threshold
+    scale_threshold = 16
+    scale_factor = 1.25;
+    cluster = LocalCluster(n_workers=n_workers)
+
+    # dask support adaptive scaling, the docs say this is optimized / designed for interactive work loads that
+    # may be idle for long amounts of time, so I am not sure that this is the best solution. I really like the
+    # more explicit approach
+    # cluster.adapt(minimum=0, maximum_memory="100 GiB", interval='500ms')
+
     # using dasks built in serializer causes issue
-    client = Client(serializers=['pickle'])
+    client = Client(cluster, serializers=['pickle'])
     future_inputs = client.scatter(inputs)
     future_targets = client.scatter(targets)
     future_device = client.scatter(device)
@@ -93,12 +110,18 @@ def train(
         # If implicit, it should grow with the batch size so each worker
         # processes a fixed number of gradients (or close to a fixed
         # number)
-        n_workers = 16
+        # n_workers = 16
 
         # Give all the data to each worker -- let's focus on
         # expensive computation with small data for now (it can easily be
         # generalized).
         batch_size = get_batch_size(model._updates, base=64, increase=0.05)
+
+        if batch_size / n_workers > scale_threshold:
+            n_workers = int(n_workers * scale_factor)
+            cluster.scale_up(n_workers)
+            print("Scaled cluster, there are now {} total workers".format(n_workers))
+
         idx = rng.choice(len(train_set), size=batch_size)
         worker_idxs = np.array_split(idx, n_workers)
 
@@ -121,9 +144,10 @@ def train(
             for worker_idx in worker_idxs
         ]
         grads = client.gather(grads)
+
+        # look at auto scaling, across workers
+
         print("Computed gradients in {:.5f} seconds".format(time.time() - start))
-        # still taking 3+ seconds to get gradients. I assume this is because I dwas not scattering
-        # the model, but I tried for a while and could not get that to work either
 
         # The gradients have been calculated. Now, let's make sure
         # ``optimizer`` can see the gradients.
