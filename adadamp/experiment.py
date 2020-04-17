@@ -18,7 +18,6 @@ def breakpoint():
     pdb.set_trace()
 
 
-@profile
 def run(
     model=None,
     opt=None,
