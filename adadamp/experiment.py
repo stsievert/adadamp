@@ -29,15 +29,23 @@ def run(
     verbose: bool = False,
     device: str = "cpu",
 ):
+    kwargs = {"num_workers": 1, "pin_memory": True} if "cuda" in device else {}
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=1000, **kwargs)
+    train_test_loader = torch.utils.data.DataLoader(
+        train_set, batch_size=1000, **kwargs
+    )
+
     data = []
     train_data = []
     for k in itertools.count():
         test_kwargs = dict(model=model, loss=opt._loss, device=device)
         train_stats = {}
         if train_stats:
-            train_stats = test(dataset=train_set, prefix="train", **test_kwargs)
-        test_stats = test(dataset=test_set, prefix="test", **test_kwargs)
-        data.append({**args, **opt.meta, **train_stats, **test_stats})
+            train_stats = test(loader=train_test_loader, prefix="train", **test_kwargs)
+        test_stats = test(loader=test_loader, prefix="test", **test_kwargs)
+        data.append(
+            {"epoch_time": time(), **args, **opt.meta, **train_stats, **test_stats}
+        )
         if verbose:
             _s = {
                 k: v
@@ -59,6 +67,7 @@ def run(
             }
             pprint(_s)
         epoch = data[-1]["epochs"]
+        mu = data[-1]["model_updates"]
         if epoch >= args["epochs"]:
             break
         try:
@@ -135,14 +144,13 @@ def train(
 
 
 def test(
-    model=None, loss=None, dataset=None, device: str="cpu", batch_size=1000, prefix=""
+    model=None, loss=None, loader=None, device: str = "cpu", prefix=""
 ):
     assert isinstance(device, str)
+
     def _test(model):
         test_loss = 0
         correct = 0
-        kwargs = {"num_workers": 1, "pin_memory": True} if "cuda" in device else {}
-        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, **kwargs)
         _device = torch.device(device)
         model = model.to(_device)
         for data, target in loader:
@@ -158,13 +166,13 @@ def test(
             )  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
 
-        test_loss /= len(dataset)
-        acc = correct / len(dataset)
+        test_loss /= len(loader.dataset)
+        acc = correct / len(loader.dataset)
         return {"loss": test_loss, "accuracy": acc}
 
     ret = {"loss": 0}
     model.eval()
     with torch.no_grad():
         ret = _test(model)
-        ret.update({"batch_size": batch_size, "device": device, "prefix": prefix})
+        ret.update({"device": device, "prefix": prefix})
     return {f"{prefix}_{k}": v for k, v in ret.items()}

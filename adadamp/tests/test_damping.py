@@ -57,6 +57,7 @@ def images():
     d, _ = random_split(d, [n, len(d) - n])
     return d
 
+
 class MNISTNet(nn.Module):
     def __init__(self):
         super(MNISTNet, self).__init__()
@@ -79,7 +80,6 @@ class MNISTNet(nn.Module):
         return output
 
 
-
 @pytest.fixture
 def large_dataset():
     X, y = make_classification(
@@ -97,7 +97,7 @@ def model():
 
 def test_basics(model, dataset, epochs=14):
     optimizer = optim.Adadelta(model.parameters(), lr=1)
-    opt = BaseDamper(model, dataset, optimizer, initial_batch_size=8)
+    opt = BaseDamper(model, dataset, optimizer, initial_batch_size=8, dwell=1)
 
     data: List[Dict[str, Any]] = []
     for epoch in range(1, epochs + 1):
@@ -120,7 +120,13 @@ def test_basics_imgs(images):
 def test_geodamp(model, dataset):
     _opt = optim.Adadelta(model.parameters(), lr=1)
     opt = GeoDamp(
-        model, dataset, _opt, initial_batch_size=1, dampingdelay=4, dampingfactor=2
+        model,
+        dataset,
+        _opt,
+        initial_batch_size=1,
+        dampingdelay=4,
+        dampingfactor=2,
+        dwell=1,
     )
     data: List[Dict[str, Any]] = []
     # Specifically let GeoDamp train for at least one epoch
@@ -137,7 +143,7 @@ def test_geodamp(model, dataset):
 
 def test_large_batch_size(model, large_dataset):
     _opt = optim.Adadelta(model.parameters(), lr=1)
-    opt = BaseDamper(model, large_dataset, _opt, initial_batch_size=1024)
+    opt = BaseDamper(model, large_dataset, _opt, initial_batch_size=1024, dwell=1)
     data: List[Dict[str, Any]] = []
     data2: List[Dict[str, Any]] = []
     for epoch in range(1, 16 + 1):
@@ -155,7 +161,9 @@ def test_large_batch_size(model, large_dataset):
 
 def test_padadamp(model, dataset):
     _opt = optim.Adadelta(model.parameters(), lr=1)
-    opt = PadaDamp(model, dataset, _opt, batch_growth_rate=1, initial_batch_size=1)
+    opt = PadaDamp(
+        model, dataset, _opt, batch_growth_rate=1, initial_batch_size=1, dwell=1
+    )
     data: List[Dict[str, Any]] = []
     for epoch in range(1, 16 + 1):
         model, opt, meta, train_data = experiment.train(model, opt)
@@ -164,10 +172,18 @@ def test_padadamp(model, dataset):
     assert (df.damping == df.model_updates + 1).all()
 
 
-def test_adadamp(model, dataset):
+@pytest.mark.parametrize("approx_loss", [True, False])
+def test_adadamp(model, dataset, approx_loss):
     init_bs = 8
     _opt = optim.SGD(model.parameters(), lr=0.500)
-    opt = AdaDamp(model, dataset, _opt, initial_batch_size=init_bs)
+    opt = AdaDamp(
+        model,
+        dataset,
+        _opt,
+        initial_batch_size=init_bs,
+        dwell=1,
+        approx_loss=approx_loss,
+    )
     data: List[Dict[str, Any]] = []
     initial_loss = opt._get_loss()
     for epoch in range(5):
@@ -179,11 +195,16 @@ def test_adadamp(model, dataset):
     bs_hat = bs_hat.values.astype(int) + 1
     bs = df.batch_size.values
     assert (bs == bs_hat).all()
+    assert (df._last_batch_losses.apply(len) == 10).all()
+    if approx_loss:
+        has_null = df._last_batch_losses.apply(lambda x: any(_ is None for _ in x))
+        assert (~has_null).iloc[10:].all()
+
 
 def test_gradient_descent(model, dataset):
     init_bs = 8
     _opt = optim.SGD(model.parameters(), lr=0.500)
-    opt = GradientDescent(model, dataset, _opt)
+    opt = GradientDescent(model, dataset, _opt, dwell=1)
     data: List[Dict[str, Any]] = []
     initial_loss = opt._get_loss()
     for epoch in range(5):
@@ -201,7 +222,7 @@ def test_avg_loss(model, dataset):
     points are sampled.
     """
     _opt = optim.Adadelta(model.parameters(), lr=1)
-    opt = BaseDamper(model, dataset, _opt)
+    opt = BaseDamper(model, dataset, _opt, dwell=1)
     for epoch in range(1, 16 + 1):
         model, opt, meta, _ = experiment.train(model, opt)
     loss = [
@@ -223,7 +244,7 @@ def test_avg_loss(model, dataset):
 
 def test_get_params(model, dataset):
     _opt = optim.Adadelta(model.parameters(), lr=1)
-    opt = BaseDamper(model, dataset, _opt)
+    opt = BaseDamper(model, dataset, _opt, dwell=1)
     params = opt.get_params()
 
     opt2 = BaseDamper(model, dataset, _opt, **params)
@@ -252,6 +273,29 @@ def test_get_params(model, dataset):
         "epochs",
         "damper",
         "opt_name",
-        "seed",
+        "dwell",
+        "random_state",
     }
     assert set(opt.meta.keys()) == param_keys.union(meta_keys)
+
+
+@pytest.mark.parametrize("dwell", [1, 2, 4, 8, 16])
+def test_dwell(dwell, model, dataset):
+    _opt = optim.Adadelta(model.parameters(), lr=1)
+    # batch_growth_rate=1: every model update increase the batch size by 1
+    opt = PadaDamp(
+        model, dataset, _opt, dwell=dwell, initial_batch_size=1, batch_growth_rate=1
+    )
+    data = []
+    for epoch in range(1, 16 + 1):
+        model, opt, meta, train_data = experiment.train(model, opt)
+        data.extend(train_data)
+    df = pd.DataFrame(data)
+    chunks = [
+        df.damping.iloc[dwell * k : dwell * (k + 1)].values
+        for k in range(len(df) // dwell)
+    ]
+    if dwell > 1:
+        assert all(np.allclose(np.diff(c), 0) for c in chunks)
+    else:
+        assert all(len(c) == 1 for c in chunks)

@@ -1,4 +1,4 @@
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .damping import (
     BaseDamper,
@@ -10,6 +10,7 @@ from .damping import (
     GradientDescent,
     ConvergenceError,
 )
+from .utils import _get_resnet18
 
 __all__ = [
     "BaseDamper",
