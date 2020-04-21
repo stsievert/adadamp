@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 
@@ -68,6 +69,7 @@ def test_main():
     # Only for making tests run faster
     dataset, _ = torch.utils.data.random_split(train_set, [2000, len(train_set) - 2000])
     train_set, test_set = torch.utils.data.random_split(dataset, [1000, 1000])
+    test_loader = DataLoader(test_set, batch_size=300)
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
 
@@ -87,9 +89,8 @@ def test_main():
 
     print("Starting...")
     for epoch in range(1, args.epochs + 1):
-        train(model=model, opt=optimizer, verbose=10)
-        data = test(model=model, loss=loss, dataset=test_set)
-        print(data)
+        train(model=model, opt=optimizer)
+        data = test(model=model, loss=loss, loader=test_loader)
 
     if args.save_model:
         torch.save(model.state_dict(), "mnist_cnn.pt")
