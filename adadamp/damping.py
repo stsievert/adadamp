@@ -170,9 +170,9 @@ class BaseDamper:
 
     def _get_batch(self, batch_size=None):
         idx = self._get_example_indices()
-        data = [self._dataset[i][0] for i in idx]
-        data = [d.reshape(-1, *d.size()) for d in data]
-        target = [self._dataset[i][1] for i in idx]
+        data_target = [self._dataset[i] for i in idx]
+        data = [d[0].reshape(-1, *d[0].size()) for d in data_target]
+        target = [d[1] for d in data_target]
         return torch.cat(data), torch.tensor(target)
 
     def _step(self, **kwargs):
