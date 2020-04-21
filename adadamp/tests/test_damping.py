@@ -299,3 +299,22 @@ def test_dwell(dwell, model, dataset):
         assert all(np.allclose(np.diff(c), 0) for c in chunks)
     else:
         assert all(len(c) == 1 for c in chunks)
+
+
+def test_dwell_init_geo_increase(model, dataset):
+    dwell = 512
+    _opt = optim.Adagrad(model.parameters(), lr=1)
+    # batch_growth_rate=1: every model update increase the batch size by 1
+    opt = PadaDamp(
+        model, dataset, _opt, dwell=dwell, initial_batch_size=1, batch_growth_rate=1
+    )
+    data = []
+    for epoch in range(1, 16 + 1):
+        model, opt, meta, train_data = experiment.train(model, opt)
+        data.extend(train_data)
+    df = pd.DataFrame(data)
+    cbs = np.arange(64) + 1  # cnts batch size
+    dbs = [[cbs[2**i]] * 2**i for i in range(4)]  # discrete bs
+    dbs = sum(dbs, [])
+    assert len(dbs) == 15
+    assert (np.array(dbs) == df.batch_size.iloc[1:1 + len(dbs)]).all()

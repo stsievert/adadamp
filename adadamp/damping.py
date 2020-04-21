@@ -15,12 +15,6 @@ import torch.nn as nn
 Number = Union[float, int]
 
 
-def breakpoint():
-    import pdb
-
-    pdb.set_trace()
-
-
 class BaseDamper:
     """Damp the noise in the gradient estimate.
 
@@ -114,9 +108,11 @@ class BaseDamper:
             (e.g., :class:`torch.optim.AdaGrad`)
         """
         start = time()
-        mu = self._meta["model_updates"]
+        updates = self._meta["model_updates"]
+        updates_to_change_bs = 2 ** np.arange(np.log2(self.dwell))
+        updates_to_change_bs = updates_to_change_bs.astype(int).tolist()
 
-        if self._meta["model_updates"] % self.dwell == 0:
+        if (updates % self.dwell == 0) or (updates in updates_to_change_bs):
             damping = self.damping()
             self._meta["damping_time"] = time() - start
             self._batch_size = int(damping)
@@ -438,8 +434,8 @@ class GradientDescent(BaseDamper):
         return self._meta["len_dataset"]
 
 
-def _ceil(x):
-    return int(x) + 1
+def _ceil(x: float) -> int:
+    return int(np.ceil(x).astype(int))
 
 
 class ConvergenceError(Exception):
