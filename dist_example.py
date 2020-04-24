@@ -138,7 +138,7 @@ def train_model(model, train_set, kwargs):
     # create client and scatter data
     print("Creating Dask client...")
     start = time.time()
-    n_workers = 1
+    n_workers = kwargs["initial_batch_size"] // kwargs["grads_per_worker"]
     cluster = LocalCluster(n_workers=n_workers)
     client = Client(cluster, serializers=['pickle'])
     print("=== Completed in {:.3f} seconds".format(time.time() - start))
@@ -160,7 +160,7 @@ def train_model(model, train_set, kwargs):
         if model_updates % kwargs["dwell"] == 0:
             print("Updating batch size")
             bs = _batch_size(kwargs["initial_batch_size"], model_updates, kwargs["batch_growth_rate"])
-            n_workers = bs // 16
+            n_workers = bs // kwargs["grads_per_worker"]
             # we want the works to scale with the batch size exactly
             if cluster.n_workers != n_workers:
                 client.scale(n_workers)
@@ -184,6 +184,7 @@ if __name__ == "__main__":
         "batch_growth_rate": 0.3486433523,
         "dwell": 100,
         "max_batch_size": 1024,
+        "grads_per_worker": 16,
         "initial_batch_size": 24,
         "epochs": 20_000,
     }
