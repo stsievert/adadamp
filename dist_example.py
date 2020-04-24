@@ -2,7 +2,8 @@ from __future__ import print_function
 from types import SimpleNamespace
 from typing import Callable, Dict, Any, Union, Any, Union, Optional
 from copy import copy, deepcopy
-
+from torchvision.datasets import FashionMNIST
+from torchvision.transforms import Compose
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,158 +29,82 @@ from adadamp._dist import gradient
 """
 
 class Net(nn.Module):
+    """
+    Net for classification of FashionMINST dataset
+    """
+
     def __init__(self):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(1, 32, 3, 1)
-        self.conv2 = nn.Conv2d(32, 64, 3, 1)
-        self.dropout1 = nn.Dropout2d(0.25)
-        self.dropout2 = nn.Dropout2d(0.5)
-        self.fc1 = nn.Linear(9216, 128)
-        self.fc2 = nn.Linear(128, 10)
+        self.hidden_size = 100
+        self.final_convs = 100
+        self.conv1 = nn.Conv2d(1, 30, 5, stride=1)
+        self.conv2 = nn.Conv2d(30, 60, 5, stride=1)
+        self.conv3 = nn.Conv2d(60, self.final_convs, 3, stride=1)
+        self.fc1 = nn.Linear(1 * 1 * self.final_convs, self.hidden_size)
+        self.fc2 = nn.Linear(self.hidden_size, 10)
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = F.relu(x)
-        x = self.conv2(x)
-        x = F.max_pool2d(x, 2)
-        x = self.dropout1(x)
-        x = torch.flatten(x, 1)
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.dropout2(x)
+        x = F.relu(self.conv1(x))
+        x = F.max_pool2d(x, 2, 2)
+        x = F.relu(self.conv2(x))
+        x = F.max_pool2d(x, 2, 2)
+        x = F.relu(self.conv3(x))
+        x = F.max_pool2d(x, 2, 2)
+        x = x.view(-1, 1 * 1 * self.final_convs)
+        x = F.relu(self.fc1(x))
+        # x = F.relu(self.fc2(x))
         x = self.fc2(x)
-        output = F.log_softmax(x, dim=1)
-        return output
+        return F.log_softmax(x, dim=1)
+
+def _get_fashionmnist():
+    """
+    Gets FashionMINWT test and train data
+    """
+    transform_train = [
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.1307,), std=(0.3081,)),
+    ]
+    transform_test = [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+    _dir = "_traindata/fashionmnist/"
+    train_set = FashionMNIST(
+        _dir, train=True, transform=Compose(transform_train), download=True,
+    )
+    test_set = FashionMNIST(_dir, train=False, transform=Compose(transform_test))
+    return train_set, test_set
 
 
-def get_batch_size(model_updates: int, base: int = 64, increase: float = 0.1) -> int:
+def _batch_size(model_updates: int, base: int = 64, increase: float = 0.1) -> int:
+    """
+    Computes next batch size
+    """
     return int(np.ceil(base + increase * model_updates))
 
 
-def train(
-    model: nn.Module,
-    device: torch.device,
-    inputs: torch.Tensor,
-    targets: torch.Tensor,
-    optimizer: torch.optim.Optimizer,
-    epoch: int,
-    verbose: Optional[Union[bool, float]] = 0.1,
-) -> Dict[str, Union[int, float]]:
-    # The model will be stored on the master node. The workers will be assigned
-    # to calculate the gradients. When they return the gradients, the master
-    # node will iterate on the model, and repeat the loop (again asking workers
-    # to compute the gradient).
-    model.train()
-    rng = np.random.RandomState(abs(hash(str(epoch))) % (2 ** 31))
-
-    if not hasattr(model, "_updates"):
-        model._updates = 0
-        model._num_eg_processed = 0
-    if isinstance(verbose, bool):
-        verbose = 0.1
-
-    _num_eg_print = -1
-    _start_eg = copy(model._num_eg_processed)
-
-    # this value will be scaled 
-    n_workers = 4
-
-    # we will increase the number of workers when each is computing more than
-    # `scale_threashold` gradients
-    # scale factor determines by how much we will the number of workers upon reaching the threshold
-    scale_threshold = 16
-    scale_factor = 1.25;
-    cluster = LocalCluster(n_workers=n_workers)
-
-    # dask support adaptive scaling, the docs say this is optimized / designed for interactive work loads that
-    # may be idle for long amounts of time, so I am not sure that this is the best solution. I really like the
-    # more explicit approach
-    # cluster.adapt(minimum=0, maximum_memory="100 GiB", interval='500ms')
-
-    # using dasks built in serializer causes issue
-    client = Client(cluster, serializers=['pickle'])
-    future_inputs = client.scatter(inputs)
-    future_targets = client.scatter(targets)
-    future_device = client.scatter(device)
-
-    while True:
-        # Let's set the number of workers to be static for now.
-        # This should grow as this optimization proceeds, either
-        # explicitly in this code or implicitly with Dask adaptive
-        # scaling (https://docs.dask.org/en/latest/setup/adaptive.html).
-        # If implicit, it should grow with the batch size so each worker
-        # processes a fixed number of gradients (or close to a fixed
-        # number)
-        # n_workers = 16
-
-        # Give all the data to each worker -- let's focus on
-        # expensive computation with small data for now (it can easily be
-        # generalized).
-        batch_size = get_batch_size(model._updates, base=64, increase=0.05)
-
-        if batch_size / n_workers > scale_threshold:
-            n_workers = int(n_workers * scale_factor)
-            cluster.scale_up(n_workers)
-            print("Scaled cluster, there are now {} total workers".format(n_workers))
-
-        idx = rng.choice(len(train_set), size=batch_size)
-        worker_idxs = np.array_split(idx, n_workers)
-
-        # Distribute the computation of the gradient. In practice this will
-        # mean (say) 4 GPUs to accelerate the gradient computation. Right now
-        # for ease it's a small network that doesn't need much acceleration.
-
-        future_client = client.scatter(copy(model))
-        start = time.time()
-        grads = [
-            client.submit(
-                gradient,
-                future_inputs,
-                future_targets,
-                model=future_client,
-                loss=F.nll_loss,
-                device=device,
-                idx=worker_idx,
-            )
-            for worker_idx in worker_idxs
-        ]
-        grads = client.gather(grads)
-
-        # look at auto scaling, across workers
-
-        print("Computed gradients in {:.5f} seconds".format(time.time() - start))
-
-        # The gradients have been calculated. Now, let's make sure
-        # ``optimizer`` can see the gradients.
-        optimizer.zero_grad()
-        num_data = sum(info["_num_data"] for info in grads)
-        assert num_data == batch_size
-        for name, param in model.named_parameters():
-            grad = sum(grad[name] for grad in grads)
-            param.grad = grad / num_data
-
-        # Take an optimization step
-        optimizer.step()
-
-        # From here to the end of the loop is metadata tracking: how many
-        # updates/epochs (or passes through the data), what's the loss, etc
-        model._updates += 1
-        model._num_eg_processed += num_data
-
-        epochs = model._num_eg_processed / len(train_set)
-        epochs_since_print = epochs - (_num_eg_print / len(targets))
-        loss_avg = sum(grad["_loss"] for grad in grads) / num_data
-        if _num_eg_print == -1 or epochs_since_print > verbose:
-            _num_eg_print = model._num_eg_processed
-            print(
-                "epoch={:0.3f}, updates={}, loss={:0.3f}".format(
-                    epochs, model._updates, loss_avg
-                )
-            )
-        if model._num_eg_processed >= len(targets) + _start_eg:
-            break
-    return {"num_data": model._num_eg_processed, "batch_loss": loss_avg}
-
+def _get_gradients(client, model_future, train_data_future, train_lbl_future, batch_size, n_workers, verbose): 
+    """
+    Calculates the gradients at a given state
+    """
+    # get batches for each worker to compute
+    rng = np.random.RandomState()
+    idx = rng.choice(len(train_set), size=batch_size)
+    worker_idxs = np.array_split(idx, n_workers)
+    # compute gradients
+    start = time.time()
+    grads = [
+        client.submit(
+            gradient,
+            train_data_future,
+            train_lbl_future,
+            model=model_future,
+            loss=F.nll_loss,
+            idx=worker_idx,
+        )
+        for worker_idx in worker_idxs
+    ]
+    if verbose:
+        print("\t Computed gradient in {:.3f} seconds".format(time.time() - start))
+    return client.gather(grads)
 
 def test(args, model, device, test_loader, verbose=True):
     # Small modification of PyTorch's MNIST example
@@ -206,73 +131,62 @@ def test(args, model, device, test_loader, verbose=True):
         print(msg.format(test_loss, 100.0 * acc))
     return {"acc": acc, "loss": test_loss}
 
-def load_data(path):
+def train_model(model, train_set, kwargs):
     """
-    Loads train and test data
+    Trains model using an adaptive batch size
     """
-    train_set = datasets.MNIST(
-        path, train=True, download=True, transform=transform,
-    )
-    # For quicker debugging uncomment this line
-    #  train_set, _ = torch.utils.data.random_split(train_set, [2000, len(train_set) - 2000])
+    # create client and scatter data
+    print("Creating Dask client...")
+    start = time.time()
+    n_workers = 1
+    cluster = LocalCluster(n_workers=n_workers)
+    client = Client(cluster, serializers=['pickle'])
+    print("=== Completed in {:.3f} seconds".format(time.time() - start))
 
-    _train_loader = torch.utils.data.DataLoader(
-        train_set, batch_size=10_000, shuffle=False, **kwargs
-    )
+    # scatter data ahead of time
+    print("Sending data to workers...")
+    start = time.time()
+    train_data_future = [client.scatter(pt[0], broadcast=True) for pt in train_set] # client.scatter(train_data)
+    train_lbl_future = [client.scatter(pt[1], broadcast=True) for pt in train_set]  #client.scatter(train_lbl)
+    print("=== Completed in {:.3f} seconds".format(time.time() - start))
 
-    # _train_loader's shuffle=False is importnat for these lines, otherwise
-    # we're looping twice over the data, and it gets shuffled in- the meantime
-    inputs = torch.cat([input.clone() for input, _ in _train_loader])
-    targets = torch.cat([target.clone() for _, target in _train_loader])
+    # run SGF, updating BS when needed
+    print("Running SDG on model for {} epochs...".format(kwargs["epochs"]))
+    opt = optim.SGD(model.parameters(), lr=kwargs["lr"])
 
-    test_set = datasets.MNIST(path, train=False, transform=transform)
-    test_loader = torch.utils.data.DataLoader(
-        test_set, batch_size=args.test_batch_size, shuffle=True, **kwargs
-    )
-    
-    return test_set, train_set, inputs, targets, test_loader
+    # run gradients for however many grads
+    for model_updates in range(kwargs["epochs"]):
+        # track when to update batch size
+        if model_updates % kwargs["dwell"] == 0:
+            print("Updating batch size")
+            bs = _batch_size(kwargs["initial_batch_size"], model_updates, kwargs["batch_growth_rate"])
+            n_workers = bs // 16
+            # we want the works to scale with the batch size exactly
+            if cluster.n_workers != n_workers:
+                client.scale(n_workers)
+        # use the model to get the next grad step
+        model_future = client.scatter(copy(model), broadcast=True)
+        grads = _get_gradients(client, model_future, train_data_future, train_lbl_future, batch_size=bs, n_workers=n_workers, verbose=True)  # a call to Dask
+        # update SGD
+        opt.zero_grad()
+        num_data = sum(info["_num_data"] for info in grads)
+        assert num_data == batch_size
+        for name, param in model.named_parameters():
+            grad = sum(grad[name] for grad in grads)
+            param.grad = grad / num_data
+
+
 
 if __name__ == "__main__":
-    # Training settings
-    args = SimpleNamespace(
-        batch_size=64,
-        test_batch_size=1000,
-        epochs=14,
-        gamma=0.7,
-        lr=1.0,
-        no_cuda=False,
-        save_model=False,
-        seed=1,
-    )
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
-
-    torch.manual_seed(args.seed)
-
-    device = torch.device("cuda" if use_cuda else "cpu")
-
-    kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
-
-    transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-    )
-
-    # track how long to load data
-    start = time.time()
-    test_set, train_set, inputs, targets, test_loader = load_data("../data")
-
-    # output load time
-    print("Loaded data in {:.2f} seconds".format(time.time() - start))
-
-    model = Net().to(device)
-    optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
-
-    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
-    data = []
-    for epoch in range(1, args.epochs + 1):
-        r = train(model, device, inputs, targets, optimizer, epoch, verbose=0.02)
-        datum = test(args, model, device, test_loader)
-        data.append(datum)
-        scheduler.step()
-
-    if args.save_model:
-        torch.save(model.state_dict(), "mnist_cnn.pt")
+    # from to-joe
+    kwargs = {
+        "lr":0.0433062924,
+        "batch_growth_rate": 0.3486433523,
+        "dwell": 100,
+        "max_batch_size": 1024,
+        "initial_batch_size": 24,
+        "epochs": 20_000,
+    }
+    model = Net()
+    train_set, test_set = _get_fashionmnist()
+    train_model(model, train_set, kwargs)
