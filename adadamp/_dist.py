@@ -9,8 +9,7 @@ IntArray = Union[List[int], np.ndarray, torch.Tensor]
 
 
 def gradient(
-    inputs,
-    targets,
+    train_set,
     *,
     model: nn.Module,
     loss: Callable,
@@ -57,6 +56,10 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
+    inputs = [pt[0] for pt in train_set] # client.scatter(train_data)
+    targets  = [pt[1] for pt in train_set]  #client.scatter(train_lbl)
+
+
     if idx is not None:
         inputs = inputs[idx]
         targets = targets[idx]

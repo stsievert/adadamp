@@ -81,21 +81,26 @@ def _batch_size(model_updates: int, base: int = 64, increase: float = 0.1) -> in
     return int(np.ceil(base + increase * model_updates))
 
 
-def _get_gradients(client, model_future, train_data_future, train_lbl_future, batch_size, n_workers, verbose): 
+def _get_gradients(client, model_future, train_set_future, n, batch_size, n_workers, verbose): 
     """
     Calculates the gradients at a given state
     """
     # get batches for each worker to compute
+    # HELP: What is this doing?
+    print(n)
     rng = np.random.RandomState()
-    idx = rng.choice(len(train_set), size=batch_size)
+    print(rng)
+    idx = rng.choice(n, size=batch_size)
+    print(idx)
+    print(n_workers)
     worker_idxs = np.array_split(idx, n_workers)
     # compute gradients
+    print("Xomputing")
     start = time.time()
     grads = [
         client.submit(
             gradient,
-            train_data_future,
-            train_lbl_future,
+            train_set_future,
             model=model_future,
             loss=F.nll_loss,
             idx=worker_idx,
@@ -138,16 +143,15 @@ def train_model(model, train_set, kwargs):
     # create client and scatter data
     print("Creating Dask client...")
     start = time.time()
-    n_workers = kwargs["initial_batch_size"] // kwargs["grads_per_worker"]
+    n_workers = kwargs["initial_workers"]
     cluster = LocalCluster(n_workers=n_workers)
-    client = Client(cluster, serializers=['pickle'])
+    client = Client(cluster)
     print("=== Completed in {:.3f} seconds".format(time.time() - start))
 
     # scatter data ahead of time
     print("Sending data to workers...")
     start = time.time()
-    train_data_future = [client.scatter(pt[0], broadcast=True) for pt in train_set] # client.scatter(train_data)
-    train_lbl_future = [client.scatter(pt[1], broadcast=True) for pt in train_set]  #client.scatter(train_lbl)
+    train_set_future = client.scatter(train_set, broadcast=True)
     print("=== Completed in {:.3f} seconds".format(time.time() - start))
 
     # run SGF, updating BS when needed
@@ -160,13 +164,14 @@ def train_model(model, train_set, kwargs):
         if model_updates % kwargs["dwell"] == 0:
             print("Updating batch size")
             bs = _batch_size(kwargs["initial_batch_size"], model_updates, kwargs["batch_growth_rate"])
-            n_workers = bs // kwargs["grads_per_worker"]
+            n_workers = max(kwargs["initial_workers"], bs // kwargs["grads_per_worker"])
             # we want the works to scale with the batch size exactly
-            if cluster.n_workers != n_workers:
-                client.scale(n_workers)
+            if cluster.workers != n_workers:
+                cluster.scale(n_workers)
         # use the model to get the next grad step
         model_future = client.scatter(copy(model), broadcast=True)
-        grads = _get_gradients(client, model_future, train_data_future, train_lbl_future, batch_size=bs, n_workers=n_workers, verbose=True)  # a call to Dask
+        grads = _get_gradients(client, model_future, train_set_future, n=len(train_set), batch_size=bs, n_workers=n_workers, verbose=True)  # a call to Dask
+
         # update SGD
         opt.zero_grad()
         num_data = sum(info["_num_data"] for info in grads)
@@ -174,8 +179,6 @@ def train_model(model, train_set, kwargs):
         for name, param in model.named_parameters():
             grad = sum(grad[name] for grad in grads)
             param.grad = grad / num_data
-
-
 
 if __name__ == "__main__":
     # from to-joe
@@ -186,6 +189,7 @@ if __name__ == "__main__":
         "max_batch_size": 1024,
         "grads_per_worker": 16,
         "initial_batch_size": 24,
+        "initial_workers": 8,
         "epochs": 20_000,
     }
     model = Net()
