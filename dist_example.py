@@ -14,7 +14,6 @@ from torch.optim.lr_scheduler import StepLR
 import numpy as np
 import time
 from distributed import Client, LocalCluster
-
 from adadamp._dist import gradient
 
 """
@@ -87,15 +86,10 @@ def _get_gradients(client, model_future, train_set_future, n, batch_size, n_work
     """
     # get batches for each worker to compute
     # HELP: What is this doing?
-    print(n)
     rng = np.random.RandomState()
-    print(rng)
     idx = rng.choice(n, size=batch_size)
-    print(idx)
-    print(n_workers)
     worker_idxs = np.array_split(idx, n_workers)
     # compute gradients
-    print("Xomputing")
     start = time.time()
     grads = [
         client.submit(
@@ -145,7 +139,7 @@ def train_model(model, train_set, kwargs):
     start = time.time()
     n_workers = kwargs["initial_workers"]
     cluster = LocalCluster(n_workers=n_workers)
-    client = Client(cluster)
+    client = Client(cluster, deserializers=["dask", "pickle"], serializers=["dask", "pickle"])
     print("=== Completed in {:.3f} seconds".format(time.time() - start))
 
     # scatter data ahead of time
@@ -195,3 +189,17 @@ if __name__ == "__main__":
     model = Net()
     train_set, test_set = _get_fashionmnist()
     train_model(model, train_set, kwargs)
+
+
+
+
+"""
+Things I need help with / wanna talk about:
+    - What matrics specifically do you think I should track?
+    --  Right now I have: time to create client, time to send data to client, time to compute 1 grad set, time to compute entire training
+    - How should I save these metrics? CSV of some kind? Is there a library made for stuff like this already I could use
+    - Why am I having serialization errors?
+    - Am I using dask right? It feels wrong that I am passing a client around to the get_gradient
+    ---- It also seems like ugly code when I am making multiple futures in different places, i think im looking for tips on how to make my code look better
+    - What is that code doing?
+"""
