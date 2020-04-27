@@ -15,12 +15,6 @@ import torch.nn as nn
 Number = Union[float, int]
 
 
-def breakpoint():
-    import pdb
-
-    pdb.set_trace()
-
-
 class BaseDamper:
     """Damp the noise in the gradient estimate.
 
@@ -114,9 +108,11 @@ class BaseDamper:
             (e.g., :class:`torch.optim.AdaGrad`)
         """
         start = time()
-        mu = self._meta["model_updates"]
+        updates = self._meta["model_updates"]
+        updates_to_change_bs = 2 ** np.arange(np.log2(self.dwell))
+        updates_to_change_bs = updates_to_change_bs.astype(int).tolist()
 
-        if self._meta["model_updates"] % self.dwell == 0:
+        if (updates % self.dwell == 0) or updates <= 2 * self.dwell:
             damping = self.damping()
             self._meta["damping_time"] = time() - start
             self._batch_size = int(damping)
@@ -174,9 +170,9 @@ class BaseDamper:
 
     def _get_batch(self, batch_size=None):
         idx = self._get_example_indices()
-        data = [self._dataset[i][0] for i in idx]
-        data = [d.reshape(-1, *d.size()) for d in data]
-        target = [self._dataset[i][1] for i in idx]
+        data_target = [self._dataset[i] for i in idx]
+        data = [d[0].reshape(-1, *d[0].size()) for d in data_target]
+        target = [d[1] for d in data_target]
         return torch.cat(data), torch.tensor(target)
 
     def _step(self, **kwargs):
@@ -296,19 +292,9 @@ class AdaDamp(BaseDamper):
         if not self.approx_loss:
             loss = self._get_loss()
         else:
-            _loss = self._meta["batch_loss"]
-            _blosses = self._meta["_last_batch_losses"]
-            self._meta["_last_batch_losses"] = [_loss, *_blosses[:-1]]
-            if any(_ is None for _ in self._meta["_last_batch_losses"]):
-                loss = _loss
-            else:
-                losses = self._meta["_last_batch_losses"]
-                loss = np.mean(losses)
-            if loss is None or self._meta["batch_size"] <= 25:
-                loss = self._get_loss(frac=0.1)
+            loss = self._get_loss(frac=0.1)
             if loss >= 1e6:
                 raise ConvergenceError(f"loss with approx_loss too high ({loss:0.2e})")
-            loss *= 0.95
 
         if self._meta["model_updates"] == 0:
             self._meta["_initial_loss"] = loss
@@ -438,8 +424,8 @@ class GradientDescent(BaseDamper):
         return self._meta["len_dataset"]
 
 
-def _ceil(x):
-    return int(x) + 1
+def _ceil(x: float) -> int:
+    return int(np.ceil(x).astype(int))
 
 
 class ConvergenceError(Exception):

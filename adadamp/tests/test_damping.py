@@ -169,7 +169,7 @@ def test_padadamp(model, dataset):
         model, opt, meta, train_data = experiment.train(model, opt)
         data += train_data
     df = pd.DataFrame(data)
-    assert (df.damping == df.model_updates + 1).all()
+    assert (df.damping == np.ceil(df.model_updates)).all()
 
 
 @pytest.mark.parametrize("approx_loss", [True, False])
@@ -192,7 +192,7 @@ def test_adadamp(model, dataset, approx_loss):
     df = pd.DataFrame(data)
 
     bs_hat = init_bs * df.loc[0, "_complete_loss"] / df._complete_loss
-    bs_hat = bs_hat.values.astype(int) + 1
+    bs_hat = np.ceil(bs_hat.values).astype(int)
     bs = df.batch_size.values
     assert (bs == bs_hat).all()
     assert (df._last_batch_losses.apply(len) == 10).all()
@@ -291,11 +291,35 @@ def test_dwell(dwell, model, dataset):
         model, opt, meta, train_data = experiment.train(model, opt)
         data.extend(train_data)
     df = pd.DataFrame(data)
+
+    # Because geometric delay... (tested below)
+    damping = df.damping.iloc[dwell:]
+
     chunks = [
-        df.damping.iloc[dwell * k : dwell * (k + 1)].values
+        damping.iloc[dwell * k : dwell * (k + 1)].values
         for k in range(len(df) // dwell)
     ]
+    chunks = [c for c in chunks if len(c)]
     if dwell > 1:
         assert all(np.allclose(np.diff(c), 0) for c in chunks)
     else:
-        assert all(len(c) == 1 for c in chunks)
+        assert all(len(c) <= 1 for c in chunks)
+
+
+def test_dwell_init_geo_increase(model, dataset):
+    dwell = 512
+    _opt = optim.Adagrad(model.parameters(), lr=1)
+    # batch_growth_rate=1: every model update increase the batch size by 1
+    opt = PadaDamp(
+        model, dataset, _opt, dwell=dwell, initial_batch_size=1, batch_growth_rate=1
+    )
+    data = []
+    for epoch in range(1, 16 + 1):
+        model, opt, meta, train_data = experiment.train(model, opt)
+        data.extend(train_data)
+    df = pd.DataFrame(data)
+    cbs = np.arange(64) + 1  # cnts batch size
+    dbs = [[cbs[2**i]] * 2**i for i in range(4)]  # discrete bs
+    dbs = sum(dbs, [])
+    assert len(dbs) == 15
+    assert (np.array(dbs) == df.batch_size.iloc[1:1 + len(dbs)]).all()
