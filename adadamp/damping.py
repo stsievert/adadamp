@@ -112,7 +112,7 @@ class BaseDamper:
         updates_to_change_bs = 2 ** np.arange(np.log2(self.dwell))
         updates_to_change_bs = updates_to_change_bs.astype(int).tolist()
 
-        if (updates % self.dwell == 0) or (updates in updates_to_change_bs):
+        if (updates % self.dwell == 0) or updates <= 2 * self.dwell:
             damping = self.damping()
             self._meta["damping_time"] = time() - start
             self._batch_size = int(damping)
@@ -292,19 +292,9 @@ class AdaDamp(BaseDamper):
         if not self.approx_loss:
             loss = self._get_loss()
         else:
-            _loss = self._meta["batch_loss"]
-            _blosses = self._meta["_last_batch_losses"]
-            self._meta["_last_batch_losses"] = [_loss, *_blosses[:-1]]
-            if any(_ is None for _ in self._meta["_last_batch_losses"]):
-                loss = _loss
-            else:
-                losses = self._meta["_last_batch_losses"]
-                loss = np.mean(losses)
-            if loss is None or self._meta["batch_size"] <= 25:
-                loss = self._get_loss(frac=0.1)
+            loss = self._get_loss(frac=0.1)
             if loss >= 1e6:
                 raise ConvergenceError(f"loss with approx_loss too high ({loss:0.2e})")
-            loss *= 0.95
 
         if self._meta["model_updates"] == 0:
             self._meta["_initial_loss"] = loss
