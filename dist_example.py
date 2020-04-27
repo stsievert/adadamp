@@ -16,17 +16,6 @@ import time
 from distributed import Client, LocalCluster
 from adadamp._dist import gradient
 
-"""
-  - Look at dask scaling number of workers to grow with batch size
-  (use example whre batch size grows by 1 each iteration)
-  - Look at improving speed of train function by having it load data in train
-    - Load before train and pass futures to the train function 
-    - Pass a client to train and pass it futures
-
-  Goal: Give every worker all the data, compute gradients for these indivies for different
-        workers
-"""
-
 class Net(nn.Module):
     """
     Net for classification of FashionMINST dataset
@@ -86,8 +75,10 @@ def _get_gradients(client, model_future, train_set_future, n, batch_size, n_work
     """
     # get batches for each worker to compute
     # HELP: What is this doing?
-    rng = np.random.RandomState()
-    idx = rng.choice(n, size=batch_size)
+
+    # pass a seed here
+    rng = np.random.RandomState() # Deterministic way to generate random numbers
+    idx = rng.choice(n, size=batch_size) # size random indexes
     worker_idxs = np.array_split(idx, n_workers)
     # compute gradients
     start = time.time()
@@ -172,7 +163,10 @@ def train_model(model, train_set, kwargs):
         assert num_data == batch_size
         for name, param in model.named_parameters():
             grad = sum(grad[name] for grad in grads)
+            # --- move the averaging to get_gradiations
             param.grad = grad / num_data
+
+
 
 if __name__ == "__main__":
     # from to-joe
@@ -189,17 +183,3 @@ if __name__ == "__main__":
     model = Net()
     train_set, test_set = _get_fashionmnist()
     train_model(model, train_set, kwargs)
-
-
-
-
-"""
-Things I need help with / wanna talk about:
-    - What matrics specifically do you think I should track?
-    --  Right now I have: time to create client, time to send data to client, time to compute 1 grad set, time to compute entire training
-    - How should I save these metrics? CSV of some kind? Is there a library made for stuff like this already I could use
-    - Why am I having serialization errors?
-    - Am I using dask right? It feels wrong that I am passing a client around to the get_gradient
-    ---- It also seems like ugly code when I am making multiple futures in different places, i think im looking for tips on how to make my code look better
-    - What is that code doing?
-"""
