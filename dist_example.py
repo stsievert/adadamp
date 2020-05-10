@@ -152,7 +152,7 @@ def train_model(model, train_set, kwargs):
             param.grad = grad / num_data
 
         # update metrics!
-        metrics.append(pd.DataFrame.from_dict({ 'grad_time': grad_time, 'loop_time': time.time() - loop_start }))
+        metrics.append(pd.DataFrame.from_dict({ 'grad_time': grad_time, 'loop_time': time.time() - loop_start, 'kwargs': kwargs, 'idx': model_updates }))
 
     # have last entry have overall data: total time, client init time, send to data to clinet time
     metrics.append(pd.DataFrame.from_dict({ 'train_time': time.time() - start_time, 'client_init': client_init }))
