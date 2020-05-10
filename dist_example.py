@@ -4,9 +4,8 @@ from typing import Callable, Dict, Any, Union, Any, Union, Optional
 from copy import copy, deepcopy
 from torchvision.datasets import FashionMNIST
 from torchvision.transforms import Compose
+from dist_example_model import Net
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import sys
 from torchvision import datasets, transforms
@@ -15,34 +14,6 @@ import numpy as np
 import time
 from distributed import Client, LocalCluster
 from adadamp._dist import gradient
-
-class Net(nn.Module):
-    """
-    Net for classification of FashionMINST dataset
-    """
-
-    def __init__(self):
-        super(Net, self).__init__()
-        self.hidden_size = 100
-        self.final_convs = 100
-        self.conv1 = nn.Conv2d(1, 30, 5, stride=1)
-        self.conv2 = nn.Conv2d(30, 60, 5, stride=1)
-        self.conv3 = nn.Conv2d(60, self.final_convs, 3, stride=1)
-        self.fc1 = nn.Linear(1 * 1 * self.final_convs, self.hidden_size)
-        self.fc2 = nn.Linear(self.hidden_size, 10)
-
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = F.relu(self.conv2(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = F.relu(self.conv3(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = x.view(-1, 1 * 1 * self.final_convs)
-        x = F.relu(self.fc1(x))
-        # x = F.relu(self.fc2(x))
-        x = self.fc2(x)
-        return F.log_softmax(x, dim=1)
 
 def _get_fashionmnist():
     """
@@ -69,7 +40,7 @@ def _batch_size(model_updates: int, base: int = 64, increase: float = 0.1) -> in
     return int(np.ceil(base + increase * model_updates))
 
 
-def _get_gradients(client, model_future, train_set_future, n, batch_size, n_workers, verbose): 
+def _get_gradients(client, model_future, train_set_future, n, idx, batch_size, n_workers, verbose): 
     """
     Calculates the gradients at a given state
     """
@@ -77,7 +48,7 @@ def _get_gradients(client, model_future, train_set_future, n, batch_size, n_work
     # HELP: What is this doing?
 
     # pass a seed here
-    rng = np.random.RandomState() # Deterministic way to generate random numbers
+    rng = np.random.RandomState(seed=idx) # Deterministic way to generate random numbers
     idx = rng.choice(n, size=batch_size) # size random indexes
     worker_idxs = np.array_split(idx, n_workers)
     # compute gradients
@@ -130,7 +101,10 @@ def train_model(model, train_set, kwargs):
     start = time.time()
     n_workers = kwargs["initial_workers"]
     cluster = LocalCluster(n_workers=n_workers)
-    client = Client(cluster, deserializers=["dask", "pickle"], serializers=["dask", "pickle"])
+    client = Client(cluster)
+    # HELP: I think the workers must have the model, still errors when I upload thee model
+    client.wait_for_workers(n_workers)
+    client.upload_file('dist_example_model.py')
     print("=== Completed in {:.3f} seconds".format(time.time() - start))
 
     # scatter data ahead of time
@@ -143,6 +117,8 @@ def train_model(model, train_set, kwargs):
     print("Running SDG on model for {} epochs...".format(kwargs["epochs"]))
     opt = optim.SGD(model.parameters(), lr=kwargs["lr"])
 
+    # init our metric tracking
+
     # run gradients for however many grads
     for model_updates in range(kwargs["epochs"]):
         # track when to update batch size
@@ -154,8 +130,11 @@ def train_model(model, train_set, kwargs):
             if cluster.workers != n_workers:
                 cluster.scale(n_workers)
         # use the model to get the next grad step
-        model_future = client.scatter(copy(model), broadcast=True)
-        grads = _get_gradients(client, model_future, train_set_future, n=len(train_set), batch_size=bs, n_workers=n_workers, verbose=True)  # a call to Dask
+        # HELP: Does this look correct for removing gradients?
+        new_model = copy(model)
+        new_model.zero_grad()
+        model_future = client.scatter(copy(new_model), broadcast=True)
+        grads = _get_gradients(client, model_future, train_set_future, n=len(train_set), idx=model_updates, batch_size=bs, n_workers=n_workers, verbose=True)  # a call to Dask
 
         # update SGD
         opt.zero_grad()
