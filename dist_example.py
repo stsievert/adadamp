@@ -105,22 +105,24 @@ def train_model(model, train_set, kwargs):
     # HELP: I think the workers must have the model, still errors when I upload thee model
     client.wait_for_workers(n_workers)
     client.upload_file('dist_example_model.py')
-    print("=== Completed in {:.3f} seconds".format(time.time() - start))
 
     # scatter data ahead of time
-    print("Sending data to workers...")
-    start = time.time()
     train_set_future = client.scatter(train_set, broadcast=True)
-    print("=== Completed in {:.3f} seconds".format(time.time() - start))
+    client_init = time.time() - start
 
     # run SGF, updating BS when needed
     print("Running SDG on model for {} epochs...".format(kwargs["epochs"]))
     opt = optim.SGD(model.parameters(), lr=kwargs["lr"])
 
     # init our metric tracking
+    metrics = [] # will add pandas datafram with keys: loop_time, grad_time
+    start_time = time.time()
 
     # run gradients for however many grads
     for model_updates in range(kwargs["epochs"]):
+
+        loop_start = time.time()
+
         # track when to update batch size
         if model_updates % kwargs["dwell"] == 0:
             print("Updating batch size")
@@ -130,11 +132,15 @@ def train_model(model, train_set, kwargs):
             if cluster.workers != n_workers:
                 cluster.scale(n_workers)
         # use the model to get the next grad step
+
         # HELP: Does this look correct for removing gradients?
         new_model = copy(model)
         new_model.zero_grad()
+
         model_future = client.scatter(copy(new_model), broadcast=True)
+        grad_start = time.time()
         grads = _get_gradients(client, model_future, train_set_future, n=len(train_set), idx=model_updates, batch_size=bs, n_workers=n_workers, verbose=True)  # a call to Dask
+        grad_time = time.time() - grad_start
 
         # update SGD
         opt.zero_grad()
@@ -144,6 +150,15 @@ def train_model(model, train_set, kwargs):
             grad = sum(grad[name] for grad in grads)
             # --- move the averaging to get_gradiations
             param.grad = grad / num_data
+
+        # update metrics!
+        metrics.append(pd.DataFrame.from_dict({ 'grad_time': grad_time, 'loop_time': time.time() - loop_start }))
+
+    # have last entry have overall data: total time, client init time, send to data to clinet time
+    metrics.append(pd.DataFrame.from_dict({ 'train_time': time.time() - start_time, 'client_init': client_init }))
+
+    print(metrics)
+
 
 
 
