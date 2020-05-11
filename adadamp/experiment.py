@@ -29,7 +29,7 @@ def run(
     verbose: bool = False,
     device: str = "cpu",
 ):
-    kwargs = {"num_workers": 1, "pin_memory": True} if "cuda" in device else {}
+    kwargs = {"num_workers": 0, "pin_memory": True} if "cuda" in device else {}
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=1000, **kwargs)
     train_test_loader = torch.utils.data.DataLoader(
         train_set, batch_size=1000, **kwargs

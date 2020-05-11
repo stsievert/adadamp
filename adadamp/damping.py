@@ -182,10 +182,10 @@ class BaseDamper:
         data, target = self._get_batch()
         self._sizes = {"data": data.size(), "target": target.size()}
 
-        data, target = data.to(self._device), target.to(self._device)
         self._opt.zero_grad()
 
         if bs <= 1024:
+            data, target = data.to(self._device), target.to(self._device)
             output = self._model(data)
             loss = self._loss(output, target, reduction="sum")
             loss /= len(data)
@@ -247,7 +247,7 @@ class BaseDamper:
             num_eg = int(frac * len(dataset))
 
         kwargs = (
-            {"num_workers": 1, "pin_memory": True} if torch.cuda.is_available() else {}
+            {"num_workers": 0, "pin_memory": True} if torch.cuda.is_available() else {}
         )
         loader = torch.utils.data.DataLoader(
             dataset, batch_size=1000, shuffle=True, **kwargs
