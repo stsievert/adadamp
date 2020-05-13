@@ -8,6 +8,7 @@ from dist_example_model import Net
 import torch
 import torch.optim as optim
 import sys
+import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 import numpy as np
@@ -44,6 +45,9 @@ def _get_gradients(client, model_future, train_set_future, n, idx, batch_size, n
     """
     Calculates the gradients at a given state
     """
+    print("-"*30)
+    print(gradient)
+    print("-"*30)
     # get batches for each worker to compute
     # HELP: What is this doing?
 
@@ -77,7 +81,7 @@ def test(args, model, device, test_loader, verbose=True):
             data, target = data.to(device), target.to(device)
             output = model(data)
             test_loss += F.nll_loss(
-                output, target, reduction="sum"
+                output, target, reduction = "sum"
             ).item()  # sum up batch loss
             pred = output.argmax(
                 dim=1, keepdim=True
@@ -102,12 +106,12 @@ def train_model(model, train_set, kwargs):
     n_workers = kwargs["initial_workers"]
     cluster = LocalCluster(n_workers=n_workers)
     client = Client(cluster)
-    # HELP: I think the workers must have the model, still errors when I upload thee model
-    client.wait_for_workers(n_workers)
-    client.upload_file('dist_example_model.py')
 
     # scatter data ahead of time
-    train_set_future = client.scatter(train_set, broadcast=True)
+    # TODO: This line causes a deserilization error later if ran
+    print(type(train_set.train_labels))
+    print(len(train_set.train_labels))
+    train_set_future = None #client.scatter(train_set, broadcast=True)
     client_init = time.time() - start
 
     # run SGF, updating BS when needed
@@ -119,11 +123,13 @@ def train_model(model, train_set, kwargs):
     start_time = time.time()
 
     # run gradients for however many grads
+    bs = -1
     for model_updates in range(kwargs["epochs"]):
 
         loop_start = time.time()
 
         # track when to update batch size
+
         if model_updates % kwargs["dwell"] == 0:
             print("Updating batch size")
             bs = _batch_size(kwargs["initial_batch_size"], model_updates, kwargs["batch_growth_rate"])
@@ -131,15 +137,17 @@ def train_model(model, train_set, kwargs):
             # we want the works to scale with the batch size exactly
             if cluster.workers != n_workers:
                 cluster.scale(n_workers)
+
         # use the model to get the next grad step
-
-        # HELP: Does this look correct for removing gradients?
         new_model = copy(model)
-        new_model.zero_grad()
+        new_model.eval()
 
-        model_future = client.scatter(copy(new_model), broadcast=True)
+        print("This line will cause a crash if we first get a future for the train set")
+        model_future = client.scatter(new_model)
+
         grad_start = time.time()
         grads = _get_gradients(client, model_future, train_set_future, n=len(train_set), idx=model_updates, batch_size=bs, n_workers=n_workers, verbose=True)  # a call to Dask
+
         grad_time = time.time() - grad_start
 
         # update SGD
@@ -152,14 +160,13 @@ def train_model(model, train_set, kwargs):
             param.grad = grad / num_data
 
         # update metrics!
-        metrics.append(pd.DataFrame.from_dict({ 'grad_time': grad_time, 'loop_time': time.time() - loop_start, 'kwargs': kwargs, 'idx': model_updates }))
+        metrics.append({ 'grad_time': grad_time, 'loop_time': time.time() - loop_start, 'kwargs': kwargs, 'idx': model_updates })
 
     # have last entry have overall data: total time, client init time, send to data to clinet time
-    metrics.append(pd.DataFrame.from_dict({ 'train_time': time.time() - start_time, 'client_init': client_init }))
-
-    print(metrics)
-
-
+    overview_metrics = pd.DataFrame.from_dict({ 'train_time': time.time() - start_time, 'client_init': client_init })
+    loop_metrics = pd.DataFrame(metrics)
+    overview_metrics.to_csv("overview_metrics.csv")
+    loop_metrics = loop_metrics.to_csv("loop_metrics.csv")
 
 
 if __name__ == "__main__":
