@@ -56,11 +56,23 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
+    # data_target = None
+    # if idx is not None:
+    #     data_target = [train_set for i in idx] 
+    # else:
+    #     data_target = [train_set for i in len(data_target)]
+
+    # inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target] 
+    # target = [d[1] for d in data_target]
+
     inputs = [pt[0] for pt in train_set] # client.scatter(train_data)
     targets  = [pt[1] for pt in train_set]  #client.scatter(train_lbl)
 
+    # inputs = [pt[0] for pt in train_set] # client.scatter(train_data)
+    # targets  = [pt[1] for pt in train_set]  #client.scatter(train_lbl)
 
     if idx is not None:
+        # TypeError: only integer scalar arrays can be converted to a scalar index
         inputs = inputs[idx]
         targets = targets[idx]
     inputs, targets = inputs.to(device), targets.to(device)

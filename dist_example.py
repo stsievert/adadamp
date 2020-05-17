@@ -15,7 +15,9 @@ import numpy as np
 import time
 from distributed import Client, LocalCluster
 from adadamp._dist import gradient
+from functools import partial, lru_cache
 
+@lru_cache()
 def _get_fashionmnist():
     """
     Gets FashionMINWT test and train data
@@ -41,34 +43,26 @@ def _batch_size(model_updates: int, base: int = 64, increase: float = 0.1) -> in
     return int(np.ceil(base + increase * model_updates))
 
 
-def _get_gradients(client, model_future, train_set_future, n, idx, batch_size, n_workers, verbose): 
+def _get_gradients(client, model_future, n, idx, batch_size, n_workers): 
     """
     Calculates the gradients at a given state
     """
-    print("-"*30)
-    print(gradient)
-    print("-"*30)
-    # get batches for each worker to compute
-    # HELP: What is this doing?
-
     # pass a seed here
+    train_set, test_set = _get_fashionmnist() # now it will use LRU to cache
     rng = np.random.RandomState(seed=idx) # Deterministic way to generate random numbers
     idx = rng.choice(n, size=batch_size) # size random indexes
     worker_idxs = np.array_split(idx, n_workers)
     # compute gradients
-    start = time.time()
     grads = [
         client.submit(
             gradient,
-            train_set_future,
+            train_set,
             model=model_future,
             loss=F.nll_loss,
             idx=worker_idx,
         )
         for worker_idx in worker_idxs
     ]
-    if verbose:
-        print("\t Computed gradient in {:.3f} seconds".format(time.time() - start))
     return client.gather(grads)
 
 def test(args, model, device, test_loader, verbose=True):
@@ -108,10 +102,6 @@ def train_model(model, train_set, kwargs):
     client = Client(cluster)
 
     # scatter data ahead of time
-    # TODO: This line causes a deserilization error later if ran
-    print(type(train_set.train_labels))
-    print(len(train_set.train_labels))
-    train_set_future = None #client.scatter(train_set, broadcast=True)
     client_init = time.time() - start
 
     # run SGF, updating BS when needed
@@ -129,7 +119,6 @@ def train_model(model, train_set, kwargs):
         loop_start = time.time()
 
         # track when to update batch size
-
         if model_updates % kwargs["dwell"] == 0:
             print("Updating batch size")
             bs = _batch_size(kwargs["initial_batch_size"], model_updates, kwargs["batch_growth_rate"])
@@ -137,19 +126,14 @@ def train_model(model, train_set, kwargs):
             # we want the works to scale with the batch size exactly
             if cluster.workers != n_workers:
                 cluster.scale(n_workers)
-
         # use the model to get the next grad step
         new_model = copy(model)
         new_model.eval()
-
-        print("This line will cause a crash if we first get a future for the train set")
         model_future = client.scatter(new_model)
-
+        # compute grads
         grad_start = time.time()
-        grads = _get_gradients(client, model_future, train_set_future, n=len(train_set), idx=model_updates, batch_size=bs, n_workers=n_workers, verbose=True)  # a call to Dask
-
+        grads = _get_gradients(client, model_future, n=len(train_set), idx=model_updates, batch_size=bs, n_workers=n_workers)  # a call to Dask
         grad_time = time.time() - grad_start
-
         # update SGD
         opt.zero_grad()
         num_data = sum(info["_num_data"] for info in grads)
