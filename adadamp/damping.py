@@ -43,6 +43,8 @@ class BaseDamper:
         This is similar to the "relaxation time" parameter in simulated
         annealing. Setting ``dwell=1`` will mean the batch size will be
         evaluated for every model update.
+    random_state : int, optional
+        The random state the samples are selected in.
 
     Notes
     -----
@@ -109,8 +111,6 @@ class BaseDamper:
         """
         start = time()
         updates = self._meta["model_updates"]
-        updates_to_change_bs = 2 ** np.arange(np.log2(self.dwell))
-        updates_to_change_bs = updates_to_change_bs.astype(int).tolist()
 
         if (updates % self.dwell == 0) or updates <= 2 * self.dwell:
             damping = self.damping()
@@ -184,7 +184,8 @@ class BaseDamper:
 
         self._opt.zero_grad()
 
-        if bs <= 1024:
+        mbs = 256
+        if bs <= mbs:
             data, target = data.to(self._device), target.to(self._device)
             output = self._model(data)
             loss = self._loss(output, target, reduction="sum")
@@ -194,8 +195,8 @@ class BaseDamper:
             loss_ret = loss.item()
         else:
             num_examples = 0
-            Data = torch.split(data, 1024)
-            Target = torch.split(target, 1024)
+            Data = torch.split(data, mbs)
+            Target = torch.split(target, mbs)
             loss_sum = 0
             for data, target in zip(Data, Target):
                 data, target = data.to(self._device), target.to(self._device)
@@ -359,8 +360,10 @@ class PadaDamp(BaseDamper):
         where k is the number of model updates.
         """
         k = self.meta["model_updates"]
-        bs = self.initial_batch_size + _ceil(self.batch_growth_rate * k)
-        return bs
+        b0 = self.initial_batch_size
+        bs = b0 + _ceil(self.batch_growth_rate * k)
+        bs_hat = (1 - np.exp(-3e-3 * k)) * bs
+        return max(b0 // 4, bs_hat)
 
 
 class GeoDamp(BaseDamper):
