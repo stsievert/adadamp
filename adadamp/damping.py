@@ -129,7 +129,7 @@ class BaseDamper:
 
         batch_loss, num_examples = self._step(**kwargs)
         epochs = self._meta["num_examples"] / self._meta["len_dataset"]
-        if batch_loss >= 1e6 and epochs > 1:
+        if (batch_loss >= 1e6 or np.isnan(batch_loss)) and epochs > 1:
             raise ConvergenceError(
                 f"The model is diverging; batch_loss={batch_loss:0.2e}"
             )
