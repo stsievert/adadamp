@@ -130,3 +130,7 @@ dmypy.json
 
 dask-worker-space
 *.swp
+*.swn
+*.swo
+*.pt
+_traindata/*
