@@ -6,9 +6,29 @@ from copy import copy
 import torch.nn.functional as F
 import torch.nn as nn
 import numpy as np
+from torchvision.datasets import FashionMNIST
+from torchvision.transforms import Compose
+from torchvision import datasets, transforms
+from functools import lru_cache
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
 
+@lru_cache()
+def _get_fashionmnist():
+    """
+    Gets FashionMINWT test and train data
+    """
+    transform_train = [
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.1307,), std=(0.3081,)),
+    ]
+    transform_test = [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+    _dir = "_traindata/fashionmnist/"
+    train_set = FashionMNIST(
+        _dir, train=True, transform=Compose(transform_train), download=True,
+    )
+    return train_set
 
 def gradient(
     train_set,
@@ -16,7 +36,7 @@ def gradient(
     model: nn.Module,
     loss: Callable,
     device = torch.device("cpu"),
-    idx: Optional[IntArray] = None,
+    idx: IntArray,
 ) -> Dict[str, Union[torch.Tensor, int]]:
     r"""
     Compute the model gradient for the function ``loss``.
@@ -58,8 +78,13 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
-    data_target = list(train_set)
-    inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target] 
+    # Dirty hack! This function should not be in this file.
+    #
+    # However, client.scatter(train_set) created problems with
+    # client.scatter(model)
+    # See https://github.com/dask/distributed/issues/3807 for more detail
+    train_set = _get_fashionmnist()
+
     data_target = [train_set[i] for i in idx]
     inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
     targets = [d[1] for d in data_target]

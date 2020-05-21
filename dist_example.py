@@ -44,15 +44,21 @@ def _batch_size(model_updates: int, base: int = 64, increase: float = 0.1) -> in
     return int(np.ceil(base + increase * model_updates))
 
 
-def _get_gradients(client, model_future, n, idx, batch_size, n_workers): 
+def _get_gradients(client, model_future, n, idx, batch_size, n_workers):
     """
     Calculates the gradients at a given state
     """
     # pass a seed here
-    train_set, test_set = _get_fashionmnist() # now it will use LRU to cache
     rng = np.random.RandomState(seed=idx) # Deterministic way to generate random numbers
     idx = rng.choice(n, size=batch_size) # size random indexes
     worker_idxs = np.array_split(idx, n_workers)
+
+    ## This is a dirty hack. See https://github.com/dask/distributed/issues/3807
+    ## for more detail
+    #  train_set, test_set = _get_fashionmnist()
+    #  train_set = client.scatter(train_set, broadcast=True)
+    train_set = None
+
     # compute gradients
     grads = [
         client.submit(
@@ -130,7 +136,7 @@ def train_model(model, train_set, kwargs):
         # use the model to get the next grad step
         new_model = copy(model)
         new_model.eval()
-        model_future = client.scatter(new_model)
+        model_future = client.scatter(new_model, broadcast=True)
         # compute grads
         grad_start = time.time()
         grads = _get_gradients(client, model_future, n=len(train_set), idx=model_updates, batch_size=bs, n_workers=n_workers)  # a call to Dask
