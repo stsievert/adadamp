@@ -60,28 +60,17 @@ def gradient(
     """
     data_target = list(train_set)
     inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target] 
+    data_target = [train_set[i] for i in idx]
+    inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
     targets = [d[1] for d in data_target]
 
-    # inputs = [pt[0] for pt in train_set] # client.scatter(train_data)
-    # targets  = [pt[1] for pt in train_set]  #client.scatter(train_lbl)
+    inputs = torch.cat(inputs)
+    targets = torch.tensor(targets)
 
-    if idx is not None:
-        # HELP: Where are the extra array nests coming from?
-        inputs = [inputs[i][0][0] for i in idx]
-        targets = [targets[i] for i in idx]
-    # temporary
-    int_0 = copy(inputs[0])
-    print("Inputs - type: {} - len: {} = {}".format(type(inputs), len(inputs), inputs))
-    print("Targets - type: {} - len: {} = {}".format(type(targets), len(targets), targets))
-    # attempting to convert array of tensors into 1 tensor for inputs
-    # attempting to convert normal python list of ints into 1 tensor for targets
-    inputs, targets = torch.stack(inputs).to(device), torch.tensor(targets, device=device)
+    outputs = model(inputs)
+    print(outputs.shape)
 
-    # int_0 is of size 28x28
-    outputs = model(int_0)
-    print(outputs)
-
-    loss = loss(outputs, targets, reduction="sum")
-    loss.backward()
+    _loss = loss(outputs, targets, reduction="sum")
+    _loss.backward()
     grads = {k: v.grad for k, v in model.named_parameters()}
-    return {"_num_data": len(outputs), "_loss": loss.item(), **grads}
+    return {"_num_data": len(outputs), "_loss": _loss.item(), **grads}

@@ -16,6 +16,7 @@ import time
 from distributed import Client, LocalCluster
 from adadamp._dist import gradient
 from functools import partial, lru_cache
+import pandas as pd
 
 @lru_cache()
 def _get_fashionmnist():
@@ -137,7 +138,7 @@ def train_model(model, train_set, kwargs):
         # update SGD
         opt.zero_grad()
         num_data = sum(info["_num_data"] for info in grads)
-        assert num_data == batch_size
+        assert num_data == bs
         for name, param in model.named_parameters():
             grad = sum(grad[name] for grad in grads)
             # --- move the averaging to get_gradiations
