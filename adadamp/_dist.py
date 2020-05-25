@@ -93,7 +93,6 @@ def gradient(
     targets = torch.tensor(targets)
 
     outputs = model(inputs)
-    print(outputs.shape)
 
     _loss = loss(outputs, targets, reduction="sum")
     _loss.backward()

@@ -91,7 +91,7 @@ def test(args, model, device, test_loader, verbose=True):
 
     test_loss /= len(test_loader.dataset)
 
-    acc = correct / len(test_loader.dataset)
+    acc = correct / len(test_loader.dataset) 
     if verbose:
         msg = "\nTest set: loss_avg={:.3f}, accuracy=({:.1f}%)\n"
         print(msg.format(test_loss, 100.0 * acc))
@@ -121,15 +121,16 @@ def train_model(model, train_set, kwargs):
 
     # run gradients for however many grads
     bs = -1
+    log_suffix = "_r1"
     for model_updates in range(kwargs["epochs"]):
 
         loop_start = time.time()
 
         # track when to update batch size
         if model_updates % kwargs["dwell"] == 0:
-            print("Updating batch size")
             bs = _batch_size(kwargs["initial_batch_size"], model_updates, kwargs["batch_growth_rate"])
             n_workers = max(kwargs["initial_workers"], bs // kwargs["grads_per_worker"])
+            print("Updating batch size to {}, computing across {} workers".format(bs, n_workers))
             # we want the works to scale with the batch size exactly
             if cluster.workers != n_workers:
                 cluster.scale(n_workers)
@@ -151,13 +152,17 @@ def train_model(model, train_set, kwargs):
             param.grad = grad / num_data
 
         # update metrics!
-        metrics.append({ 'grad_time': grad_time, 'loop_time': time.time() - loop_start, 'kwargs': kwargs, 'idx': model_updates })
+        metrics.append({ 'grad_time': grad_time, 'bs': bs, 'n_workers': n_workers, 'loop_time': time.time() - loop_start, 'kwargs': kwargs, 'idx': model_updates })
+
+        if model_updates % kwargs["save_freq"] == 0:
+            print("Saving metrics to disk")
+            pd.DataFrame(metrics).to_csv("loop_metrics" + log_suffix + ".csv")
 
     # have last entry have overall data: total time, client init time, send to data to clinet time
     overview_metrics = pd.DataFrame.from_dict({ 'train_time': time.time() - start_time, 'client_init': client_init })
     loop_metrics = pd.DataFrame(metrics)
-    overview_metrics.to_csv("overview_metrics.csv")
-    loop_metrics = loop_metrics.to_csv("loop_metrics.csv")
+    overview_metrics.to_csv("overview_metrics" + log_suffix + "csv")
+    loop_metrics.to_csv("loop_metrics" + log_suffix + ".csv")
 
 
 if __name__ == "__main__":
@@ -167,10 +172,11 @@ if __name__ == "__main__":
         "batch_growth_rate": 0.3486433523,
         "dwell": 100,
         "max_batch_size": 1024,
-        "grads_per_worker": 16,
+        "grads_per_worker": 64,
         "initial_batch_size": 24,
-        "initial_workers": 8,
+        "initial_workers": 3,
         "epochs": 20_000,
+        "save_freq": 10
     }
     model = Net()
     train_set, test_set = _get_fashionmnist()
