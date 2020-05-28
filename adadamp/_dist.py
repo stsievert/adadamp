@@ -13,10 +13,17 @@ from functools import lru_cache
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
 
+
 @lru_cache()
 def _get_fashionmnist():
     """
     Gets FashionMINWT test and train data
+
+    Dirty hack! This function should not be in this file.
+  
+    However, client.scatter(train_set) created problems with
+    client.scatter(model)
+    See https://github.com/dask/distributed/issues/3807 for more detail
     """
     transform_train = [
         transforms.RandomHorizontalFlip(),
@@ -30,12 +37,13 @@ def _get_fashionmnist():
     )
     return train_set
 
+
 def gradient(
     train_set,
     *,
     model: nn.Module,
     loss: Callable,
-    device = torch.device("cpu"),
+    device=torch.device("cpu"),
     idx: IntArray,
 ) -> Dict[str, Union[torch.Tensor, int]]:
     r"""
@@ -78,13 +86,14 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
-    # Dirty hack! This function should not be in this file.
-    #
-    # However, client.scatter(train_set) created problems with
-    # client.scatter(model)
-    # See https://github.com/dask/distributed/issues/3807 for more detail
+    # note: this is a hack, see _get_fashiomnist() docstring
     train_set = _get_fashionmnist()
 
+    # the reason for loading the dataset like this is to avoid
+    # a performance hit when manually pulling from a PyTorch data
+    # loader
+    #
+    # See: https://github.com/stsievert/adadamp/pull/2#discussion_r416187089
     data_target = [train_set[i] for i in idx]
     inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
     targets = [d[1] for d in data_target]
