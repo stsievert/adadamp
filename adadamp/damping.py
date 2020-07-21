@@ -112,7 +112,7 @@ class BaseDamper:
         start = time()
         updates = self._meta["model_updates"]
 
-        if (updates % self.dwell == 0):# or updates <= 2 * self.dwell:
+        if (updates % self.dwell == 0) or updates <= 2 * self.dwell:
             damping = self.damping()
             self._meta["damping_time"] = time() - start
             self._batch_size = int(damping)

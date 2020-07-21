@@ -187,7 +187,7 @@ def test_adadamp(model, dataset):
         data += train_data
     df = pd.DataFrame(data)
 
-    bs_hat = init_bs * df.loc[0, "_initial_loss"] / df._last_loss
+    bs_hat = init_bs * df.loc[0, "_initial_loss"] / df._complete_loss
     bs_hat = np.ceil(bs_hat.values).astype(int)
     bs = df.batch_size.values
     assert (bs_hat <= bs).all()
@@ -315,7 +315,8 @@ def test_dwell_init_geo_increase(model, dataset):
     dbs = [[cbs[2 ** i]] * 2 ** i for i in range(4)]  # discrete bs
     dbs = sum(dbs, [])
     assert len(dbs) == 15
-    assert (np.array(dbs) == df.batch_size.iloc[1 : 1 + len(dbs)]).all()
+    # Because of exponential increase initially for geodamp
+    assert (df.batch_size.iloc[1 : 1 + len(dbs)] <= np.array(dbs)).all()
 
 
 def test_lr_decays(model, dataset):
