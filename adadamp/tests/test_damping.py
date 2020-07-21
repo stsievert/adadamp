@@ -317,6 +317,10 @@ def test_dwell_init_geo_increase(model, dataset):
     assert len(dbs) == 15
     # Because of exponential increase initially for geodamp
     assert (df.batch_size.iloc[1 : 1 + len(dbs)] <= np.array(dbs)).all()
+    dbs = [[cbs[2**i]] * 2**i for i in range(4)]  # discrete bs
+    dbs = sum(dbs, [])
+    assert len(dbs) == 15
+    assert (df.batch_size.iloc[1:1 + len(dbs)] <= np.array(dbs)).all()
 
 
 def test_lr_decays(model, dataset):
@@ -348,4 +352,3 @@ def test_lr_decays(model, dataset):
     assert set(damping_factor.unique()) == {1, 2, 4, 8, 16, 32}
     assert set(df.batch_size) == {4, 8}
     assert set(df.lr_) == {1, 1/2, 1/4, 1/8, 1/16}
-
