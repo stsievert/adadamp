@@ -112,7 +112,7 @@ class BaseDamper:
         start = time()
         updates = self._meta["model_updates"]
 
-        if (updates % self.dwell == 0) or updates <= 2 * self.dwell:
+        if (updates % self.dwell == 0):# or updates <= 2 * self.dwell:
             damping = self.damping()
             self._meta["damping_time"] = time() - start
             self._batch_size = int(damping)
@@ -179,7 +179,7 @@ class BaseDamper:
         start = time()
 
         bs = self._batch_size
-        data, target = self._get_batch()
+        data, target = self._get_batch(batch_size=bs)
         self._sizes = {"data": data.size(), "target": target.size()}
 
         self._opt.zero_grad()
@@ -240,7 +240,7 @@ class BaseDamper:
 
     def _get_loss(
         self, dataset: Optional[Dataset] = None, frac: Optional[float] = None,
-    ):
+    ) -> float:
         if dataset is None:
             dataset = self._dataset
         num_eg = len(dataset)
@@ -267,6 +267,7 @@ class BaseDamper:
                     break
         if frac is None:
             assert _num_eg == len(dataset)
+        assert type(total_loss) == float
         return total_loss / _num_eg
 
 

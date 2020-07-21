@@ -39,12 +39,12 @@ def run(
     train_data = []
     for k in itertools.count():
         test_kwargs = dict(model=model, loss=opt._loss, device=device)
-        train_stats = {}
+        _train_stats = {}
         if train_stats:
-            train_stats = test(loader=train_test_loader, prefix="train", **test_kwargs)
+            _train_stats = test(loader=train_test_loader, prefix="train", **test_kwargs)
         test_stats = test(loader=test_loader, prefix="test", **test_kwargs)
         data.append(
-            {"epoch_time": time(), **args, **opt.meta, **train_stats, **test_stats}
+            {"epoch_time": time(), **args, **opt.meta, **_train_stats, **test_stats}
         )
         if verbose:
             _s = {
@@ -63,6 +63,9 @@ def run(
                     "damping",
                     "test_accuracy",
                     "train_accuracy",
+                    "test_loss",
+                    "train_loss",
+                    "damping",
                 ]
             }
             pprint(_s)
