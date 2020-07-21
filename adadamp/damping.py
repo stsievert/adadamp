@@ -15,12 +15,6 @@ import torch.nn as nn
 Number = Union[float, int]
 
 
-def breakpoint():
-    import pdb
-
-    pdb.set_trace()
-
-
 class BaseDamper:
     """Damp the noise in the gradient estimate.
 
@@ -49,6 +43,8 @@ class BaseDamper:
         This is similar to the "relaxation time" parameter in simulated
         annealing. Setting ``dwell=1`` will mean the batch size will be
         evaluated for every model update.
+    random_state : int, optional
+        The random state the samples are selected in.
 
     Notes
     -----
@@ -66,7 +62,7 @@ class BaseDamper:
         loss: Callable = F.nll_loss,
         initial_batch_size: int = 1,
         device: str = "cpu",
-        max_batch_size: Optional[Number] = None,
+        max_batch_size: Optional[int] = None,
         best_train_loss: Optional[float] = None,
         random_state: Optional[int] = None,
         dwell: int=20,
@@ -114,9 +110,9 @@ class BaseDamper:
             (e.g., :class:`torch.optim.AdaGrad`)
         """
         start = time()
-        mu = self._meta["model_updates"]
+        updates = self._meta["model_updates"]
 
-        if self._meta["model_updates"] % self.dwell == 0:
+        if (updates % self.dwell == 0) or updates <= 2 * self.dwell:
             damping = self.damping()
             self._meta["damping_time"] = time() - start
             self._batch_size = int(damping)
@@ -133,7 +129,7 @@ class BaseDamper:
 
         batch_loss, num_examples = self._step(**kwargs)
         epochs = self._meta["num_examples"] / self._meta["len_dataset"]
-        if batch_loss >= 1e6 and epochs > 1:
+        if (batch_loss >= 1e6 or np.isnan(batch_loss)) and epochs > 1:
             raise ConvergenceError(
                 f"The model is diverging; batch_loss={batch_loss:0.2e}"
             )
@@ -174,22 +170,23 @@ class BaseDamper:
 
     def _get_batch(self, batch_size=None):
         idx = self._get_example_indices()
-        data = [self._dataset[i][0] for i in idx]
-        data = [d.reshape(-1, *d.size()) for d in data]
-        target = [self._dataset[i][1] for i in idx]
+        data_target = [self._dataset[i] for i in idx]
+        data = [d[0].reshape(-1, *d[0].size()) for d in data_target]
+        target = [d[1] for d in data_target]
         return torch.cat(data), torch.tensor(target)
 
     def _step(self, **kwargs):
         start = time()
 
         bs = self._batch_size
-        data, target = self._get_batch()
+        data, target = self._get_batch(batch_size=bs)
         self._sizes = {"data": data.size(), "target": target.size()}
 
-        data, target = data.to(self._device), target.to(self._device)
         self._opt.zero_grad()
 
-        if bs <= 1024:
+        mbs = 256
+        if bs <= mbs:
+            data, target = data.to(self._device), target.to(self._device)
             output = self._model(data)
             loss = self._loss(output, target, reduction="sum")
             loss /= len(data)
@@ -198,8 +195,8 @@ class BaseDamper:
             loss_ret = loss.item()
         else:
             num_examples = 0
-            Data = torch.split(data, 1024)
-            Target = torch.split(target, 1024)
+            Data = torch.split(data, mbs)
+            Target = torch.split(target, mbs)
             loss_sum = 0
             for data, target in zip(Data, Target):
                 data, target = data.to(self._device), target.to(self._device)
@@ -243,7 +240,7 @@ class BaseDamper:
 
     def _get_loss(
         self, dataset: Optional[Dataset] = None, frac: Optional[float] = None,
-    ):
+    ) -> float:
         if dataset is None:
             dataset = self._dataset
         num_eg = len(dataset)
@@ -251,7 +248,7 @@ class BaseDamper:
             num_eg = int(frac * len(dataset))
 
         kwargs = (
-            {"num_workers": 1, "pin_memory": True} if torch.cuda.is_available() else {}
+            {"num_workers": 0, "pin_memory": True} if torch.cuda.is_available() else {}
         )
         loader = torch.utils.data.DataLoader(
             dataset, batch_size=1000, shuffle=True, **kwargs
@@ -270,6 +267,7 @@ class BaseDamper:
                     break
         if frac is None:
             assert _num_eg == len(dataset)
+        assert type(total_loss) == float
         return total_loss / _num_eg
 
 
@@ -278,6 +276,7 @@ class AdaDamp(BaseDamper):
         self.approx_loss = approx_loss
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "adadamp"
+        self._meta["_last_batch_losses"] = [None] * 10
 
     def damping(self) -> int:
         r"""Adaptively damp the noise depending on the current loss with
@@ -295,12 +294,9 @@ class AdaDamp(BaseDamper):
         if not self.approx_loss:
             loss = self._get_loss()
         else:
-            loss = self._meta["batch_loss"]
-            if loss is None or self._meta["batch_size"] <= 25:
-                loss = self._get_loss(frac=0.1)
+            loss = self._get_loss(frac=0.1)
             if loss >= 1e6:
                 raise ConvergenceError(f"loss with approx_loss too high ({loss:0.2e})")
-            loss *= 0.95
 
         if self._meta["model_updates"] == 0:
             self._meta["_initial_loss"] = loss
@@ -365,8 +361,10 @@ class PadaDamp(BaseDamper):
         where k is the number of model updates.
         """
         k = self.meta["model_updates"]
-        bs = self.initial_batch_size + _ceil(self.batch_growth_rate * k)
-        return bs
+        b0 = self.initial_batch_size
+        bs = b0 + _ceil(self.batch_growth_rate * k)
+        bs_hat = (1 - np.exp(-3e-3 * k)) * bs
+        return max(b0 // 4, bs_hat)
 
 
 class GeoDamp(BaseDamper):
@@ -430,8 +428,8 @@ class GradientDescent(BaseDamper):
         return self._meta["len_dataset"]
 
 
-def _ceil(x):
-    return int(x) + 1
+def _ceil(x: float) -> int:
+    return int(np.ceil(x).astype(int))
 
 
 class ConvergenceError(Exception):

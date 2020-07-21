@@ -162,20 +162,24 @@ def test_large_batch_size(model, large_dataset):
 def test_padadamp(model, dataset):
     _opt = optim.Adadelta(model.parameters(), lr=1)
     opt = PadaDamp(
-        model, dataset, _opt, batch_growth_rate=1, initial_batch_size=1, dwell=1
+        model, dataset, _opt, batch_growth_rate=1, initial_batch_size=4, dwell=1
     )
     data: List[Dict[str, Any]] = []
     for epoch in range(1, 16 + 1):
         model, opt, meta, train_data = experiment.train(model, opt)
         data += train_data
     df = pd.DataFrame(data)
-    assert (df.damping == df.model_updates + 1).all()
+    assert (df.damping >= 1).all()
+    # Commented out because PadaDamp uses exponential growth
+    #  assert (df.damping == np.ceil(df.model_updates)).all()
 
 
 def test_adadamp(model, dataset):
     init_bs = 8
     _opt = optim.SGD(model.parameters(), lr=0.500)
-    opt = AdaDamp(model, dataset, _opt, initial_batch_size=init_bs, dwell=1)
+    opt = AdaDamp(
+        model, dataset, _opt, initial_batch_size=init_bs, dwell=1, approx_loss=False,
+    )
     data: List[Dict[str, Any]] = []
     initial_loss = opt._get_loss()
     for epoch in range(5):
@@ -183,10 +187,11 @@ def test_adadamp(model, dataset):
         data += train_data
     df = pd.DataFrame(data)
 
-    bs_hat = init_bs * df.loc[0, "_complete_loss"] / df._complete_loss
-    bs_hat = bs_hat.values.astype(int) + 1
+    bs_hat = init_bs * df.loc[0, "_initial_loss"] / df._complete_loss
+    bs_hat = np.ceil(bs_hat.values).astype(int)
     bs = df.batch_size.values
-    assert (bs == bs_hat).all()
+    assert (bs_hat <= bs).all()
+    #  assert (bs == bs_hat).all()
 
 
 def test_gradient_descent(model, dataset):
@@ -210,7 +215,7 @@ def test_avg_loss(model, dataset):
     points are sampled.
     """
     _opt = optim.Adadelta(model.parameters(), lr=1)
-    opt = BaseDamper(model, dataset, _opt, dwell=1)
+    opt = BaseDamper(model, dataset, _opt, dwell=1, initial_batch_size=32)
     for epoch in range(1, 16 + 1):
         model, opt, meta, _ = experiment.train(model, opt)
     loss = [
@@ -272,18 +277,78 @@ def test_dwell(dwell, model, dataset):
     _opt = optim.Adadelta(model.parameters(), lr=1)
     # batch_growth_rate=1: every model update increase the batch size by 1
     opt = PadaDamp(
-        model, dataset, _opt, dwell=dwell, initial_batch_size=1, batch_growth_rate=1
+        model, dataset, _opt, dwell=dwell, initial_batch_size=4, batch_growth_rate=1
     )
     data = []
     for epoch in range(1, 16 + 1):
         model, opt, meta, train_data = experiment.train(model, opt)
         data.extend(train_data)
     df = pd.DataFrame(data)
+
+    # Because geometric delay... (tested below)
+    damping = df.damping.iloc[dwell:]
+
     chunks = [
-        df.damping.iloc[dwell * k : dwell * (k + 1)].values
+        damping.iloc[dwell * k : dwell * (k + 1)].values
         for k in range(len(df) // dwell)
     ]
+    chunks = [c for c in chunks if len(c)]
     if dwell > 1:
-        assert all(np.allclose(np.diff(c), 0) for c in chunks)
+        assert all(np.allclose(np.diff(c), 0) for c in chunks[1:])
     else:
-        assert all(len(c) == 1 for c in chunks)
+        assert all(len(c) <= 1 for c in chunks)
+
+
+def test_dwell_init_geo_increase(model, dataset):
+    dwell = 512
+    _opt = optim.Adagrad(model.parameters(), lr=1)
+    # batch_growth_rate=1: every model update increase the batch size by 1
+    opt = PadaDamp(
+        model, dataset, _opt, dwell=dwell, initial_batch_size=4, batch_growth_rate=1
+    )
+    data = []
+    for epoch in range(1, 16 + 1):
+        model, opt, meta, train_data = experiment.train(model, opt)
+        data.extend(train_data)
+    df = pd.DataFrame(data)
+    cbs = np.arange(64) + 1  # cnts batch size
+    dbs = [[cbs[2 ** i]] * 2 ** i for i in range(4)]  # discrete bs
+    dbs = sum(dbs, [])
+    assert len(dbs) == 15
+    # Because of exponential increase initially for geodamp
+    assert (df.batch_size.iloc[1 : 1 + len(dbs)] <= np.array(dbs)).all()
+    dbs = [[cbs[2**i]] * 2**i for i in range(4)]  # discrete bs
+    dbs = sum(dbs, [])
+    assert len(dbs) == 15
+    assert (df.batch_size.iloc[1:1 + len(dbs)] <= np.array(dbs)).all()
+
+
+def test_lr_decays(model, dataset):
+    _opt = optim.SGD(model.parameters(), lr=1)
+    # batch_growth_rate=1: every model update increase the batch size by 1
+    opt = GeoDamp(
+        model,
+        dataset,
+        _opt,
+        dwell=1,
+        initial_batch_size=4,
+        dampingdelay=3,
+        dampingfactor=2,
+        max_batch_size=8,
+    )
+    data = []
+    for epoch in range(1, 16 + 1):
+        model, opt, meta, train_data = experiment.train(model, opt)
+        data.extend(train_data)
+    df = pd.DataFrame(data)
+    damping_factor = df.damping / 4
+
+    # Damping always increasing/decreasing
+    assert (np.diff(df.batch_size) >= 0).all()
+    assert (np.diff(df.lr_) <= 0).all()
+    assert (np.diff(damping_factor) >= 0).all()
+
+    # Make sure increases by correct amounts
+    assert set(damping_factor.unique()) == {1, 2, 4, 8, 16, 32}
+    assert set(df.batch_size) == {4, 8}
+    assert set(df.lr_) == {1, 1/2, 1/4, 1/8, 1/16}
