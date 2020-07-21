@@ -43,6 +43,8 @@ class BaseDamper:
         This is similar to the "relaxation time" parameter in simulated
         annealing. Setting ``dwell=1`` will mean the batch size will be
         evaluated for every model update.
+    random_state : int, optional
+        The random state the samples are selected in.
 
     Notes
     -----
@@ -109,8 +111,6 @@ class BaseDamper:
         """
         start = time()
         updates = self._meta["model_updates"]
-        updates_to_change_bs = 2 ** np.arange(np.log2(self.dwell))
-        updates_to_change_bs = updates_to_change_bs.astype(int).tolist()
 
         if (updates % self.dwell == 0) or updates <= 2 * self.dwell:
             damping = self.damping()
@@ -129,7 +129,7 @@ class BaseDamper:
 
         batch_loss, num_examples = self._step(**kwargs)
         epochs = self._meta["num_examples"] / self._meta["len_dataset"]
-        if batch_loss >= 1e6 and epochs > 1:
+        if (batch_loss >= 1e6 or np.isnan(batch_loss)) and epochs > 1:
             raise ConvergenceError(
                 f"The model is diverging; batch_loss={batch_loss:0.2e}"
             )
@@ -179,13 +179,14 @@ class BaseDamper:
         start = time()
 
         bs = self._batch_size
-        data, target = self._get_batch()
+        data, target = self._get_batch(batch_size=bs)
         self._sizes = {"data": data.size(), "target": target.size()}
 
-        data, target = data.to(self._device), target.to(self._device)
         self._opt.zero_grad()
 
-        if bs <= 1024:
+        mbs = 256
+        if bs <= mbs:
+            data, target = data.to(self._device), target.to(self._device)
             output = self._model(data)
             loss = self._loss(output, target, reduction="sum")
             loss /= len(data)
@@ -194,8 +195,8 @@ class BaseDamper:
             loss_ret = loss.item()
         else:
             num_examples = 0
-            Data = torch.split(data, 1024)
-            Target = torch.split(target, 1024)
+            Data = torch.split(data, mbs)
+            Target = torch.split(target, mbs)
             loss_sum = 0
             for data, target in zip(Data, Target):
                 data, target = data.to(self._device), target.to(self._device)
@@ -239,7 +240,7 @@ class BaseDamper:
 
     def _get_loss(
         self, dataset: Optional[Dataset] = None, frac: Optional[float] = None,
-    ):
+    ) -> float:
         if dataset is None:
             dataset = self._dataset
         num_eg = len(dataset)
@@ -247,7 +248,7 @@ class BaseDamper:
             num_eg = int(frac * len(dataset))
 
         kwargs = (
-            {"num_workers": 1, "pin_memory": True} if torch.cuda.is_available() else {}
+            {"num_workers": 0, "pin_memory": True} if torch.cuda.is_available() else {}
         )
         loader = torch.utils.data.DataLoader(
             dataset, batch_size=1000, shuffle=True, **kwargs
@@ -266,6 +267,7 @@ class BaseDamper:
                     break
         if frac is None:
             assert _num_eg == len(dataset)
+        assert type(total_loss) == float
         return total_loss / _num_eg
 
 
@@ -359,8 +361,10 @@ class PadaDamp(BaseDamper):
         where k is the number of model updates.
         """
         k = self.meta["model_updates"]
-        bs = self.initial_batch_size + _ceil(self.batch_growth_rate * k)
-        return bs
+        b0 = self.initial_batch_size
+        bs = b0 + _ceil(self.batch_growth_rate * k)
+        bs_hat = (1 - np.exp(-3e-3 * k)) * bs
+        return max(b0 // 4, bs_hat)
 
 
 class GeoDamp(BaseDamper):

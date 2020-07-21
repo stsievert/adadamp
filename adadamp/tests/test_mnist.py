@@ -1,6 +1,7 @@
 from __future__ import print_function
 from types import SimpleNamespace
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,6 +9,10 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
+from torchvision.datasets import FashionMNIST
+from torchvision.transforms import Compose
+from torch.utils.data import DataLoader
+
 
 from adadamp import PadaDamp
 
@@ -94,3 +99,24 @@ def test_main():
 
     if args.save_model:
         torch.save(model.state_dict(), "mnist_cnn.pt")
+
+def test_normalization():
+    transform_train = [
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.1307,), std=(0.3081,)),
+    ]
+    transform_test = [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+    _dir = "_traindata/fashionmnist/"
+    train_set = FashionMNIST(
+        _dir, train=True, transform=Compose(transform_train), download=True,
+    )
+    test_set = FashionMNIST(_dir, train=False, transform=Compose(transform_test))
+    imgs = [img for img, label in train_set]
+    train_loader = DataLoader(train_set, batch_size=1000, shuffle=False)
+
+    pixels = np.concatenate([img.numpy().flatten() for img, _ in train_loader])
+    assert 0.50 < pixels.mean() < 0.51
+    assert 1.14 < pixels.std() < 1.15
+    assert "0.504" in str(pixels.mean())
+    assert "1.145" in str(pixels.std())
