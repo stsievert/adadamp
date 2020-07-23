@@ -3,39 +3,10 @@ from torch.autograd import Variable
 
 import torch
 from copy import copy
-import torch.nn.functional as F
 import torch.nn as nn
 import numpy as np
-from torchvision.datasets import FashionMNIST
-from torchvision.transforms import Compose
-from torchvision import datasets, transforms
-from functools import lru_cache
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
-
-
-@lru_cache()
-def _get_fashionmnist():
-    """
-    Gets FashionMINWT test and train data
-
-    Dirty hack! This function should not be in this file.
-  
-    However, client.scatter(train_set) created problems with
-    client.scatter(model)
-    See https://github.com/dask/distributed/issues/3807 for more detail
-    """
-    transform_train = [
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.1307,), std=(0.3081,)),
-    ]
-    transform_test = [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-    _dir = "_traindata/fashionmnist/"
-    train_set = FashionMNIST(
-        _dir, train=True, transform=Compose(transform_train), download=True,
-    )
-    return train_set
 
 
 def gradient(
@@ -86,20 +57,16 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
-    # note: this is a hack, see _get_fashiomnist() docstring
-    train_set = _get_fashionmnist()
-
     # the reason for loading the dataset like this is to avoid
     # a performance hit when manually pulling from a PyTorch data
     # loader
     #
     # See: https://github.com/stsievert/adadamp/pull/2#discussion_r416187089
     data_target = [train_set[i] for i in idx]
-    inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
-    targets = [d[1] for d in data_target]
-
-    inputs = torch.cat(inputs)
-    targets = torch.tensor(targets)
+    _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
+    _targets = [d[1] for d in data_target]
+    inputs = torch.cat(_inputs)
+    targets = torch.tensor(_targets)
 
     outputs = model(inputs)
 
