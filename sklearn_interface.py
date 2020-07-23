@@ -67,7 +67,7 @@ class BaseDamper(BaseEstimator):
 
         self.module_ = self.module(**module_kwargs)
         self.optimizer_ = self.optimizer(self.module_.parameters(), **opt_kwargs)
-        self.loss_ = self.loss(**loss_kwargs)
+        self.loss_ = self.loss(reduction="sum", **loss_kwargs)
         self.meta_ = {"n_updates": 0, "n_data": 0}
         self.initialized_ = True
 
@@ -102,6 +102,7 @@ class BaseDamper(BaseEstimator):
 
         bs = self.batch_size_()
         self.n_workers_ = bs // 32
+        # TODO: scale
 
         # compute grads
         grads = self._get_gradients(
@@ -209,7 +210,7 @@ class BaseDamper(BaseEstimator):
         # Iterate through the dataset in batches
         # TODO: integrate with IterableDataset (this is pretty much already
         # an IterableDataset but without vectorization)
-        idx = list(range(start_idx, start_idx + batch_size + 1))
+        idx = list(range(start_idx, start_idx + batch_size))
         worker_idxs = np.array_split(idx, n_workers)
 
         # Distribute the computation of the gradient. In practice this will

@@ -70,7 +70,7 @@ def gradient(
 
     outputs = model(inputs)
 
-    _loss = loss(outputs, targets, reduction="sum")
+    _loss = loss(outputs, targets)
     _loss.backward()
     grads = {k: v.grad for k, v in model.named_parameters()}
     return {"_num_data": len(outputs), "_loss": _loss.item(), **grads}
