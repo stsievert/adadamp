@@ -14,7 +14,7 @@ import torch.optim as optim
 from adadamp._dist import gradient
 
 
-class BaseDamper(BaseEstimator):
+class BaseDamper:
     def __init__(
         self,
         module,
@@ -39,18 +39,20 @@ class BaseDamper(BaseEstimator):
         self.max_batch_size = max_batch_size
         self.min_workers = min_workers
         self.max_workers = max_workers
-        self.kwargs = kwargs
-        super().__init__()
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def _get_param_names(self):
+        return [k for k in self.__dict__ if k[0] != "_" and k[-1] != "_"]
 
     def get_params(self, deep=True, **kwargs):
-        params = super().get_params(deep=deep, **kwargs)
-        return {**params, **self.kwargs}
+        params = BaseEstimator.get_params(self, deep=deep, **kwargs)
+        return params
 
     def set_params(self, **kwargs):
-        kwargs_to_send = {
-            k: kwargs.pop(k) for k, v in kwargs.items() if k in self.kwargs
-        }
-        return super().set_params(kwargs=kwargs_to_send, **kwargs)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        return self
 
     def _get_kwargs_for(self, name):
         name = f"{name}__"
@@ -131,13 +133,17 @@ class BaseDamper(BaseEstimator):
     def _get_dataset(self, X, y=None) -> Dataset:
         if isinstance(X, Dataset):
             return X
+        if isinstance(X, list):
+            X = np.ndarray(X)
         if isinstance(X, np.ndarray):
             X = torch.from_numpy(X)
+        if isinstance(y, list) and len(y):
+            y = np.ndarray(y)
         if isinstance(y, np.ndarray):
             y = torch.from_numpy(y)
 
         args = (X, y) if y is not None else (X,)
-        return TensorDataset(*X)
+        return TensorDataset(*args)
 
     def partial_fit(self, X, y=None, **fit_params):
         if not hasattr(self, "initialized_") or not self.initialized_:
@@ -158,7 +164,7 @@ class BaseDamper(BaseEstimator):
         fit_params : dict
             Arguments to pass to self.module_.forward
         """
-        dataset = self._get_dataset(X, y=None)
+        dataset = self._get_dataset(X, y=y)
         start_data = copy(self.meta_["n_data"])
         while True:
             bs = self.train_step(dataset, **fit_params)
@@ -210,57 +216,17 @@ class BaseDamper(BaseEstimator):
         # Iterate through the dataset in batches
         # TODO: integrate with IterableDataset (this is pretty much already
         # an IterableDataset but without vectorization)
-        idx = list(range(start_idx, start_idx + batch_size))
+        n = len(dataset)
+        idx = [i % n for i in range(start_idx, start_idx + batch_size)]
         worker_idxs = np.array_split(idx, n_workers)
 
         # Distribute the computation of the gradient. In practice this will
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
-        grad_fn = partial(gradient, train_set, model=model_future, loss=self.loss_)
+        grad_fn = partial(gradient, dataset, model=model_future, loss=self.loss_)
+
+        return [grad_fn(idx=idx) for idx in worker_idxs]
+
         grad_fn = dask.delayed(grad_fn)
         grads = [grad_fn(idx=idx) for idx in worker_idxs]
         return dask.compute(*grads)
-
-
-def _get_fashionmnist():
-    """
-    Gets FashionMINWT test and train data
-
-    Dirty hack! This function should not be in this file.
-
-    However, client.scatter(train_set) created problems with
-    client.scatter(model)
-    See https://github.com/dask/distributed/issues/3807 for more detail
-    """
-    from torchvision import datasets, transforms
-    from torchvision.datasets import FashionMNIST
-    from torchvision.transforms import Compose
-
-    transform_train = [
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.1307,), std=(0.3081,)),
-    ]
-    transform_test = [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-    _dir = "_traindata/fashionmnist/"
-    train_set = FashionMNIST(
-        _dir, train=True, transform=Compose(transform_train), download=True,
-    )
-    return train_set
-
-
-if __name__ == "__main__":
-    from sklearn.datasets import make_classification
-    from dist_example_model import Net
-    from dist_example import _get_fashionmnist
-    import torch.optim as optim
-    import torch.nn as nn
-
-    X, y = make_classification()
-    train_set, test_set = _get_fashionmnist()
-
-    net = BaseDamper(
-        module=Net, loss=nn.NLLLoss, optimizer=optim.SGD, optimizer__lr=0.05
-    )
-    net.get_params()
-    net.fit(train_set)
