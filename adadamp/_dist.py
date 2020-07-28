@@ -1,25 +1,19 @@
-from typing import Callable, Dict, Any, Union, Optional, List
-from torch.autograd import Variable
-import dask
-import torch
-from skorch import NeuralNet
-from distributed import get_client
-from copy import deepcopy, copy
-import numpy as np
-import torch.nn.functional as F
-from sklearn.utils import check_random_state
-from sklearn.base import BaseEstimator
-from torch.utils.data import Dataset, IterableDataset, TensorDataset
+from copy import copy, deepcopy
 from functools import partial
+from typing import Any, Callable, Dict, List, Optional, Union
 
-import torch.optim as optim
-
-
-
-import torch
-from copy import copy
-import torch.nn as nn
+import dask
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from distributed import get_client
+from sklearn.base import BaseEstimator
+from sklearn.utils import check_random_state
+from skorch import NeuralNet
+from torch.autograd import Variable
+from torch.utils.data import Dataset, IterableDataset, TensorDataset
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
 
@@ -72,23 +66,20 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
-    # the reason for loading the dataset like this is to avoid
-    # a performance hit when manually pulling from a PyTorch data
-    # loader
-    #
-    # See: https://github.com/stsievert/adadamp/pull/2#discussion_r416187089
     data_target = [train_set[i] for i in idx]
     _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
     _targets = [d[1] for d in data_target]
     inputs = torch.cat(_inputs)
-    targets = torch.tensor(_targets)
+    targets = torch.tensor(_targets).reshape(-1, 1)
 
+    model.train()
     outputs = model(inputs)
 
-    _loss = loss(outputs, targets)
+    _loss = loss(targets, outputs)
     _loss.backward()
     grads = {k: v.grad for k, v in model.named_parameters()}
     return {"_num_data": len(outputs), "_loss": _loss.item(), **grads}
+
 
 class DaskBaseDamper:
     def __init__(
@@ -168,11 +159,8 @@ class DaskBaseDamper:
         n_data : int
             The number of data processed.
         """
-        self.optimizer_.zero_grad()
-
         # Send the model to workers
-        new_model = deepcopy(self.module_)
-        new_model.eval()
+        new_model = deepcopy(self.module_).train()
         if client:
             model_future = client.scatter(new_model, broadcast=True)
         else:
@@ -183,9 +171,10 @@ class DaskBaseDamper:
         # TODO: scale
 
         # compute grads
+        self.optimizer_.zero_grad()
         grads = self._get_gradients(
             epoch_n_data,
-            model_future,
+            new_model,
             dataset,
             batch_size=bs,
             n_workers=self.n_workers_,
@@ -194,16 +183,16 @@ class DaskBaseDamper:
 
         # update SGD
         num_data = sum(info["_num_data"] for info in grads)
-        assert num_data == bs
+        assert num_data == bs, "Sanity check on batch size"
 
         # aggregate and update the gradients
-        self.optimizer_.zero_grad()
+        #  print(grads)
         for name, param in self.module_.named_parameters():
-            grad = sum(grad[name] for grad in grads)
-            # --- move the averaging to get_gradiations
+            grad = sum(g[name] for g in grads)
             param.grad = grad / num_data
 
         self.optimizer_.step()
+        self.optimizer_.zero_grad()
         return bs
 
     def _get_dataset(self, X, y=None) -> Dataset:
@@ -249,6 +238,17 @@ class DaskBaseDamper:
             if self.meta_["n_data"] - start_data >= len(X):
                 break
         return True
+
+    def score(self, X, y):
+        dataset = self._get_dataset(X, y=y)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=1000)
+        with torch.no_grad():
+            _loss = 0
+            for Xi, yi in loader:
+                Xi, yi = Xi.to(self.device), yi.to(self.device)
+                y_hat = self.module_.forward(Xi)
+                _loss += self.loss_(yi.reshape(-1, 1), y_hat).item()
+        return _loss / len(y)
 
     def _get_gradients(
         self, start_idx, model_future, dataset, batch_size, n_workers, client=None,
@@ -300,9 +300,8 @@ class DaskBaseDamper:
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
         grad_fn = partial(gradient, dataset, model=model_future, loss=self.loss_)
-
-        return [grad_fn(idx=idx) for idx in worker_idxs]
-
         grad_fn = dask.delayed(grad_fn)
+
         grads = [grad_fn(idx=idx) for idx in worker_idxs]
-        return dask.compute(*grads)
+        out = dask.compute(*grads)
+        return out
