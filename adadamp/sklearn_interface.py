@@ -1,87 +1,20 @@
-from copy import copy, deepcopy
-from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Union
-
 import dask
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from distributed import get_client
-from sklearn.base import BaseEstimator
-from sklearn.utils import check_random_state
 from skorch import NeuralNet
-from torch.autograd import Variable
+from distributed import get_client
+from copy import deepcopy, copy
+import numpy as np
+import torch.nn.functional as F
+from sklearn.utils import check_random_state
+from sklearn.base import BaseEstimator
 from torch.utils.data import Dataset, IterableDataset, TensorDataset
+from functools import partial
 
-IntArray = Union[List[int], np.ndarray, torch.Tensor]
-
-
-def gradient(
-    train_set,
-    *,
-    model: nn.Module,
-    loss: Callable,
-    device=torch.device("cpu"),
-    idx: IntArray,
-) -> Dict[str, Union[torch.Tensor, int]]:
-    r"""
-    Compute the model gradient for the function ``loss``.
-
-    Parameters
-    ----------
-    model : nn.Module
-        PyTorch model to eval
-
-    inputs : torch.Tensor
-        Input array to model
-
-    targets : torch.Tensor
-        Target output for model. The gradient is computed with respect to this.
-
-    device : torch.device
-
-    loss : Callabale
-        PyTorch loss. Should return the loss with
-
-        .. code:: python
-
-           loss(output, out_, reduction="sum")
-
-    idx : Optional[IntArray], optional
-        The indices to compute the gradient over.
-
-    Returns
-    -------
-    grad : Dict[str, Union[Tensor, int]]
-        Gradient. This dictionary has all the keys in
-        ``model.named_parameters.keys()``.
-
-    Notes
-    -----
-    This function computes the gradient of the *sum* of inputs, not the *mean*
-    of inputs. Functionally, this means evaluates the gradient of
-    :math:`\sum_{i=1}^B l(...)`, not :math:`\frac{1}{n} \sum_{i=1}^B l(...)`
-    where `l` is the loss function for a single example.
-
-    """
-    data_target = [train_set[i] for i in idx]
-    _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
-    _targets = [d[1] for d in data_target]
-    inputs = torch.cat(_inputs)
-    targets = torch.tensor(_targets).reshape(-1, 1)
-
-    model.train()
-    outputs = model(inputs)
-
-    _loss = loss(targets, outputs)
-    _loss.backward()
-    grads = {k: v.grad for k, v in model.named_parameters()}
-    return {"_num_data": len(outputs), "_loss": _loss.item(), **grads}
+import torch.optim as optim
+from adadamp._dist import gradient
 
 
-class DaskBaseDamper:
+class BaseDamper:
     def __init__(
         self,
         module,
@@ -90,12 +23,10 @@ class DaskBaseDamper:
         *,
         metrics=None,
         batch_size=32,
-        cluster=None,
         max_batch_size=1024,
         min_workers=1,
         max_workers=8,
         device: str = "cpu",
-        grads_per_worker=32,
         **kwargs,
     ):
         self.module = module
@@ -103,8 +34,6 @@ class DaskBaseDamper:
         self.optimizer = optimizer
         self.metrics = metrics
         self.device = device
-        self.cluster = cluster
-        self.grads_per_worker = grads_per_worker
 
         self.batch_size = batch_size
         self.max_batch_size = max_batch_size
@@ -163,23 +92,24 @@ class DaskBaseDamper:
         n_data : int
             The number of data processed.
         """
+        self.optimizer_.zero_grad()
+
         # Send the model to workers
-        new_model = deepcopy(self.module_).train()
+        new_model = deepcopy(self.module_)
+        new_model.eval()
         if client:
             model_future = client.scatter(new_model, broadcast=True)
         else:
             model_future = new_model
 
         bs = self.batch_size_()
-        self.n_workers_ = bs // self.grads_per_worker
-        if self.cluster:
-            self.cluster.scale(self.n_workers_)
+        self.n_workers_ = bs // 32
+        # TODO: scale
 
         # compute grads
-        self.optimizer_.zero_grad()
         grads = self._get_gradients(
             epoch_n_data,
-            new_model,
+            model_future,
             dataset,
             batch_size=bs,
             n_workers=self.n_workers_,
@@ -188,16 +118,16 @@ class DaskBaseDamper:
 
         # update SGD
         num_data = sum(info["_num_data"] for info in grads)
-        assert num_data == bs, "Sanity check on batch size"
+        assert num_data == bs
 
         # aggregate and update the gradients
-        #  print(grads)
+        self.optimizer_.zero_grad()
         for name, param in self.module_.named_parameters():
-            grad = sum(g[name] for g in grads)
+            grad = sum(grad[name] for grad in grads)
+            # --- move the averaging to get_gradiations
             param.grad = grad / num_data
 
         self.optimizer_.step()
-        self.optimizer_.zero_grad()
         return bs
 
     def _get_dataset(self, X, y=None) -> Dataset:
@@ -243,17 +173,6 @@ class DaskBaseDamper:
             if self.meta_["n_data"] - start_data >= len(X):
                 break
         return True
-
-    def score(self, X, y):
-        dataset = self._get_dataset(X, y=y)
-        loader = torch.utils.data.DataLoader(dataset, batch_size=1000)
-        with torch.no_grad():
-            _loss = 0
-            for Xi, yi in loader:
-                Xi, yi = Xi.to(self.device), yi.to(self.device)
-                y_hat = self.module_.forward(Xi)
-                _loss += self.loss_(yi.reshape(-1, 1), y_hat).item()
-        return _loss / len(y)
 
     def _get_gradients(
         self, start_idx, model_future, dataset, batch_size, n_workers, client=None,
@@ -305,8 +224,9 @@ class DaskBaseDamper:
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
         grad_fn = partial(gradient, dataset, model=model_future, loss=self.loss_)
-        grad_fn = dask.delayed(grad_fn)
 
+        return [grad_fn(idx=idx) for idx in worker_idxs]
+
+        grad_fn = dask.delayed(grad_fn)
         grads = [grad_fn(idx=idx) for idx in worker_idxs]
-        out = dask.compute(*grads)
-        return out
+        return dask.compute(*grads)
