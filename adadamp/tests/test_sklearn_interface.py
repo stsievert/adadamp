@@ -11,7 +11,7 @@ from torchvision import datasets, transforms
 from torchvision.datasets import FashionMNIST
 from torchvision.transforms import Compose
 
-from sklearn_interface import BaseDamper
+from adadamp import DaskBaseDamper
 
 
 class Net(nn.Module):
@@ -45,7 +45,7 @@ def y():
 def test_pytorch_dataset(X, y):
     dataset = torch.utils.data.TensorDataset(X, y)
 
-    net = BaseDamper(
+    net = DaskBaseDamper(
         module=Net, loss=nn.MSELoss, optimizer=optim.SGD, optimizer__lr=0.05
     )
     net.get_params()
@@ -56,7 +56,7 @@ def test_numpy_data(X, y):
     X = X.numpy()
     y = y.numpy()
 
-    net = BaseDamper(
+    net = DaskBaseDamper(
         module=Net, loss=nn.MSELoss, optimizer=optim.SGD, optimizer__lr=0.05
     )
     net.get_params()
@@ -82,7 +82,7 @@ class SklearnComptabilityLoss(nn.MSELoss):
 
 est_checks = list(
     check_estimator(
-        BaseDamper(
+        DaskBaseDamper(
             module=SklearnComptabilityNet,
             loss=SklearnComptabilityLoss,
             optimizer=optim.SGD,
