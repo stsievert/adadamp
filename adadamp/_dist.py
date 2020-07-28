@@ -95,7 +95,7 @@ class DaskBaseDamper:
         min_workers=1,
         max_workers=8,
         device: str = "cpu",
-        example_per_worker=32,
+        grads_per_worker=32,
         **kwargs,
     ):
         self.module = module
@@ -104,7 +104,7 @@ class DaskBaseDamper:
         self.metrics = metrics
         self.device = device
         self.cluster = cluster
-        self.example_per_worker = example_per_worker
+        self.grads_per_worker = grads_per_worker
 
         self.batch_size = batch_size
         self.max_batch_size = max_batch_size
@@ -171,7 +171,7 @@ class DaskBaseDamper:
             model_future = new_model
 
         bs = self.batch_size_()
-        self.n_workers_ = bs // self.example_per_worker
+        self.n_workers_ = bs // self.grads_per_worker
         if self.cluster:
             self.cluster.scale(self.n_workers_)
 
