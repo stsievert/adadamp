@@ -17,6 +17,7 @@ dependencies:
   - python-snappy
   - pip:
     - sphinx
+    - skorch
     - numpydoc
     - fastparquet
     - pyarrow
