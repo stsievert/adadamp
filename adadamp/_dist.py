@@ -145,7 +145,7 @@ class DaskBaseDamper:
         self.initialized_ = True
 
     def batch_size_(self):
-        return 32
+        return self.batch_size
 
     def train_step(self, dataset, client=None, epoch_n_data=0, **fit_params):
         """
@@ -240,6 +240,7 @@ class DaskBaseDamper:
             bs = self.train_step(dataset, **fit_params)
             self.meta_["n_updates"] += 1
             self.meta_["n_data"] += bs
+            print(self.meta_)
             if self.meta_["n_data"] - start_data >= len(X):
                 break
         return True
