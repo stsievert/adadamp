@@ -70,12 +70,12 @@ def gradient(
     _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
     _targets = [d[1] for d in data_target]
     inputs = torch.cat(_inputs)
-    targets = torch.tensor(_targets).reshape(-1, 1)
+    targets = torch.tensor(_targets)
 
     model.train()
     outputs = model(inputs)
 
-    _loss = loss(targets, outputs)
+    _loss = loss(outputs, targets)
     _loss.backward()
     grads = {k: v.grad for k, v in model.named_parameters()}
     return {"_num_data": len(outputs), "_loss": _loss.item(), **grads}
