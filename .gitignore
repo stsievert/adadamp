@@ -136,3 +136,7 @@ dask-worker-space
 _traindata/*
 
 loop_metrics*
+
+# project specific
+_traindata/
+data/
