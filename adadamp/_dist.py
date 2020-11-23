@@ -240,7 +240,7 @@ class DaskBaseDamper:
             bs = self.train_step(dataset, **fit_params)
             self.meta_["n_updates"] += 1
             self.meta_["n_data"] += bs
-            print(self.meta_)
+            # print(self.meta_)
             if self.meta_["n_data"] - start_data >= len(X):
                 break
         return True
@@ -251,9 +251,16 @@ class DaskBaseDamper:
         with torch.no_grad():
             _loss = 0
             for Xi, yi in loader:
+
                 Xi, yi = Xi.to(self.device), yi.to(self.device)
                 y_hat = self.module_.forward(Xi)
-                _loss += self.loss_(yi.reshape(-1, 1), y_hat).item()
+                
+                print("Xi shape:", Xi.shape)
+                print("yi shape:", yi.shape)
+                print("yi re-shape:", yi.reshape(-1, 1).shape)
+                print("y-hat:", y_hat.shape) # Different 
+                
+                _loss += self.loss_(yi, y_hat).item()
         return _loss / len(y)
 
     def _get_gradients(
@@ -311,3 +318,18 @@ class DaskBaseDamper:
         grads = [grad_fn(idx=idx) for idx in worker_idxs]
         out = dask.compute(*grads)
         return out
+
+class DaskBaseDamper2(DaskBaseDamper):
+    
+    def score(self, X, y):
+        loss = super().score(X, y)
+        
+        correct = 0
+        total = 0
+        for Xi, yi in zip(X, y):
+            out = self.module_(Xi)
+            if out == yi:
+                correct += 1
+            total += 1
+            
+        return loss, (correct/total)
