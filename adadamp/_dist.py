@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import time
 from distributed import get_client
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
@@ -251,16 +252,9 @@ class DaskBaseDamper:
         with torch.no_grad():
             _loss = 0
             for Xi, yi in loader:
-
                 Xi, yi = Xi.to(self.device), yi.to(self.device)
                 y_hat = self.module_.forward(Xi)
-                
-                print("Xi shape:", Xi.shape)
-                print("yi shape:", yi.shape)
-                print("yi re-shape:", yi.reshape(-1, 1).shape)
-                print("y-hat:", y_hat.shape) # Different 
-                
-                _loss += self.loss_(yi, y_hat).item()
+                _loss += self.loss_(y_hat, yi).item()
         return _loss / len(y)
 
     def _get_gradients(
@@ -321,15 +315,43 @@ class DaskBaseDamper:
 
 class DaskBaseDamper2(DaskBaseDamper):
     
+    def fit(self, data, target):
+        start = time.time()
+        super().fit(data, target)
+        
+        stat = {
+            "n_data": self.meta_['n_data'],
+            "n_updates": self.meta_['n_updates'],
+            "epoch_time": time.time() - start,
+            "batch_size": self.batch_size_()
+        }
+        
+        if not hasattr(self, 'stats_'):
+            self.stats_ = []
+        self.stats_.append(stat)
+        
+    def get_stats(self):
+        return self.stats_
+    
+    
     def score(self, X, y):
+        
+        if not hasattr(self, "initialized_") or not self.initialized_:
+            self.initialize()
+            
         loss = super().score(X, y)
         
         correct = 0
         total = 0
-        for Xi, yi in zip(X, y):
-            out = self.module_(Xi)
-            if out == yi:
-                correct += 1
-            total += 1
+        
+        dataset = self._get_dataset(X, y=y)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=1000)
+        for Xi, yi in loader:
+            Xi = Xi.to(self.device)
+            out = self.module_.forward(Xi)
+            _, index = out.max(1)
+            truth = (index == yi).long()
+            correct += truth.sum()
+            total += truth.shape[0]
             
         return loss, (correct/total)
