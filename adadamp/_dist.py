@@ -256,6 +256,7 @@ class DaskBaseDamper:
                 y_hat = self.module_.forward(Xi)
                 _loss += self.loss_(y_hat, yi).item()
         return _loss / len(y)
+    
 
     def _get_gradients(
         self, start_idx, model_future, dataset, batch_size, n_workers, client=None,
@@ -313,45 +314,99 @@ class DaskBaseDamper:
         out = dask.compute(*grads)
         return out
 
-class DaskBaseDamper2(DaskBaseDamper):
+class DaskClassifier(DaskBaseDamper):
+    """
+    Dask based classifier built ontop of DaskBaseDamper. Changes include:
+    - Batch level statistics 
+    - Epoch level statistics
+    - Accuracy based scoring function
+    """
+    
+    def initialize(self, *args, **kwargs):
+        """
+        Initializes class instance variables
+        """
+        ret = super().initialize(*args, **kwargs)
+        
+        # batch level stats
+        self.stats_ = []
+        # epoch level stats
+        self.meta_ = {"n_updates": 0, "n_data": 0, "score_calls": 0, "score_times": [], "fit_calls": 0}
+        
+        return ret
+    
+    def get_stats(self):
+        """
+        Returns the epoch and batch level stats
+        """
+        meta_stats = deepcopy(self.meta_)
+        batch_stats = deepcopy(self.stats_)
+        
+        return meta_stats, batch_stats
     
     def fit(self, data, target):
+        """
+        Runs 1 epoch on the given data and model
+        """
+        
+        # run fit
         start = time.time()
         super().fit(data, target)
         
+        # record
         stat = {
-            "n_data": self.meta_['n_data'],
-            "n_updates": self.meta_['n_updates'],
             "epoch_time": time.time() - start,
-            "batch_size": self.batch_size_()
-        }
-        
-        if not hasattr(self, 'stats_'):
-            self.stats_ = []
+            "batch_size": self.batch_size_(),
+            "acc": None,
+            "loss": None
+        }   
         self.stats_.append(stat)
+        self.meta_["fit_calls"] += 1
         
-    def get_stats(self):
-        return self.stats_
+        return self
     
     
-    def score(self, X, y):
+    def score(self, X, y, batch_size=1000):
+        """
+        Computes the loss and accuracy of the model based
+        on passed data and targets. Returns accuracy as a float
+        """
         
         if not hasattr(self, "initialized_") or not self.initialized_:
             self.initialize()
             
-        loss = super().score(X, y)
+        # load `batch_size` at a time
+        dataset = self._get_dataset(X, y=y)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
         
+        # track correct/total classifications for accuracy
         correct = 0
         total = 0
+        _loss = 0
         
-        dataset = self._get_dataset(X, y=y)
-        loader = torch.utils.data.DataLoader(dataset, batch_size=1000)
-        for Xi, yi in loader:
-            Xi = Xi.to(self.device)
-            out = self.module_.forward(Xi)
-            _, index = out.max(1)
-            truth = (index == yi).long()
-            correct += truth.sum()
-            total += truth.shape[0]
+        # run through model
+        start_time = time.time()
+        
+        with torch.no_grad():
             
-        return loss, (correct/total)
+            for Xi, yi in loader:
+                # loss
+                Xi, yi = Xi.to(self.device), yi.to(self.device)
+                y_hat = self.module_.forward(Xi)
+                _loss += self.loss_(y_hat, yi).item()
+                
+                # acc
+                _, index = y_hat.max(1)
+                truth = (index == yi).long()
+                correct += truth.sum()
+                total += truth.shape[0]
+        
+        acc = float(correct / total) if total != 0 else 0.0
+        loss = _loss / len(y)
+        
+        # update stats
+        self.stats_[-1].update({"acc": acc, "loss": loss})
+        self.meta_["score_times"].append(time.time() - start_time)
+        self.meta_["score_calls"] += 1
+        
+        return acc
