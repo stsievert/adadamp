@@ -184,7 +184,7 @@ class DaskBaseDamper:
     def batch_size_(self):
         return self.batch_size
 
-    def train_step(self, model_opt, dataset, *, client, epoch_n_data=0, **fit_params):
+    def train_step(self, model_opt, dataset, *, client, epoch_n_data=0, len_dataset=None, **fit_params):
         """
         Calculate gradients and take one optimization step.
 
@@ -213,6 +213,7 @@ class DaskBaseDamper:
             batch_size=bs,
             client=client,
             n_workers=self.n_workers_,
+            len_dataset=len_dataset,
         )
         model_opt = client.submit(_update_model, model_opt, grads)
         return model_opt, bs
@@ -260,12 +261,16 @@ class DaskBaseDamper:
 
         # Send the model to workers
         new_model = self.module_.train()
-        model_opt = client.submit(lambda x, y: (x, y), self.module_, self.optimizer_)
+        model = client.scatter(self.module_, broadcast=True)
+        opt = client.scatter(self.optimizer_)
+        model_opt = client.submit(lambda x, y: (x, y), model, opt)
+        len_dataset = len(dataset)
+        dataset = client.scatter(dataset, broadcast=True)
 
         start_data = copy(self._meta["n_data"])
         while True:
             model_opt, bs = self.train_step(
-                model_opt, dataset, client=client, **fit_params
+                model_opt, dataset, client=client, len_dataset=len_dataset, **fit_params
             )
             self._meta["n_updates"] += 1
             self._meta["n_data"] += bs
@@ -288,7 +293,7 @@ class DaskBaseDamper:
         return _loss / len(y)
 
     def _get_gradients(
-        self, start_idx, model_opt, dataset, *, batch_size, client, n_workers
+        self, start_idx, model_opt, dataset, *, batch_size, client, n_workers, len_dataset,
     ):
         """
         Calculates the gradients at a given state. This function is
@@ -325,29 +330,16 @@ class DaskBaseDamper:
         # Iterate through the dataset in batches
         # TODO: integrate with IterableDataset (this is pretty much already
         # an IterableDataset but without vectorization)
-        n = len(dataset)
-        idx = [i % n for i in range(start_idx, start_idx + batch_size)]
+        idx = [i % len_dataset for i in range(start_idx, start_idx + batch_size)]
         worker_idxs = np.array_split(idx, n_workers)
 
         # Distribute the computation of the gradient. In practice this will
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
-        #  grad_fn = partial(gradient, dataset, model_opt=model_opt, loss=self.loss_)
-        #  grads = client.map(lambda idx: gradient(model_opt, dataset, loss=self.loss_, idx=idx), worker_idxs)
         grads = [
             client.submit(gradient, model_opt, dataset, loss=self.loss_, idx=idx)
             for idx in worker_idxs
         ]
-        # grads = [
-        #     client.submit(
-        #         gradient,
-        #         model_opt,
-        #         dataset,
-        #         loss=self.loss_,
-        #         idx=idx,
-        #     )
-        #     for idx in worker_idxs
-        # ]
         return grads
 
     @property
