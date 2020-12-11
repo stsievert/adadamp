@@ -32,6 +32,7 @@ def test_mnist_w_daskbasedamper(N=4096, batch_size=1024):
         optimizer__lr=1.0,
         batch_size=batch_size,
         grads_per_worker=batch_size // 2,
+        max_epochs=1,
     )
 
     transform = transforms.Compose(
