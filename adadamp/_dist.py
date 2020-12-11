@@ -266,10 +266,9 @@ class DaskBaseDamper:
         client = get_client()
 
         # Send the model to workers
-        new_model = self.module_.train()
-        model = client.scatter(self.module_, broadcast=True)
+        model = client.scatter(self.module_.train())
         opt = client.scatter(self.optimizer_)
-        model_opt = client.submit(lambda x, y: (x, y), model, opt)
+        model_opt = client.submit(tuple, (model, opt))
         len_dataset = len(dataset)
         dataset = client.scatter(dataset, broadcast=True)
 
