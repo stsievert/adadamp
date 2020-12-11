@@ -98,6 +98,12 @@ def _update_model(
     model_opt: Tuple[Model, Optimizer], grads: List[Grads],
 ) -> Tuple[Model, Optimizer]:
     model, optimizer = model_opt
+
+    # The deepcopy lines might be necessary -- see [1].
+    # [1] https://stackoverflow.com/questions/65257792/returning-mutated-inputs-with-dask
+
+    #  model = deepcopy(model)  # necessary?
+    #  optimizer = deepcopy(optimizer)  # necessary?
     num_data = sum(info["_num_data"] for info in grads)
 
     # aggregate and update the gradients
