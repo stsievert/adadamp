@@ -100,10 +100,11 @@ def _update_model(
     model, optimizer = model_opt
 
     # The deepcopy lines might be necessary -- see [1].
-    # [1] https://stackoverflow.com/questions/65257792/returning-mutated-inputs-with-dask
-
+    # [1]:https://stackoverflow.com/questions/65257792/returning-mutated-inputs-with-dask
+    #
     #  model = deepcopy(model)  # necessary?
     #  optimizer = deepcopy(optimizer)  # necessary?
+
     num_data = sum(info["_num_data"] for info in grads)
 
     # aggregate and update the gradients
@@ -265,10 +266,12 @@ class DaskBaseDamper:
         dataset = self._get_dataset(X, y=y)
         client = get_client()
 
-        # Send the model to workers
-        model = client.scatter(self.module_.train())
-        opt = client.scatter(self.optimizer_)
-        model_opt = client.submit(tuple, (model, opt))
+        # Send the model/optimizer to workers
+        model = client.scatter(deepcopy(self.module_.train()))
+        opt = client.scatter(deepcopy(self.optimizer_))
+        model_opt = client.submit(lambda x, y: (x, y), model, opt)
+
+        # Give all data to each worker
         len_dataset = len(dataset)
         dataset = client.scatter(dataset, broadcast=True)
 
@@ -283,7 +286,7 @@ class DaskBaseDamper:
                 break
         model, opt = model_opt.result()
         self.module_ = model
-        self.optimizer = opt
+        self.optimizer_ = opt
         return True
 
     def score(self, X, y):
@@ -350,6 +353,9 @@ class DaskBaseDamper:
     @property
     def meta_(self):
         return deepcopy(self._meta)
+
+    def _get_tags(self):
+        return BaseEstimator()._get_tags()
 
 
 class DaskClassifier(DaskBaseDamper):

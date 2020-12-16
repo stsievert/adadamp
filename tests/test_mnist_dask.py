@@ -5,12 +5,16 @@ import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torch.utils.data import Subset
 import numpy as np
+from distributed.utils_test import gen_cluster
+
 from adadamp import DaskBaseDamper
+
 
 class Model(nn.Module):
     """ modified from [1]
     [1]:https://github.com/pytorch/examples/blob/0f0c9131ca5c79d1332dce1f4c06fe942fbdc665/mnist/main.py
     """
+
     def __init__(self):
         super().__init__()
         self.conv = nn.Conv2d(1, 8, 3, 1)
@@ -24,14 +28,17 @@ class Model(nn.Module):
         return output
 
 
-def test_mnist_w_daskbasedamper(N=4096, batch_size=1024):
+@gen_cluster(client=True)
+async def test_mnist_w_dask(c, s, a, b):
+    N = 4096
+    batch_size = 1024
     net = DaskBaseDamper(
         module=Model,
         loss=nn.NLLLoss,
         optimizer=optim.Adadelta,
         optimizer__lr=1.0,
         batch_size=batch_size,
-        grads_per_worker=batch_size // 2,
+        grads_per_worker=batch_size,# // 2,
         max_epochs=1,
     )
 
