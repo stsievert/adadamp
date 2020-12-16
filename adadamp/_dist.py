@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from time import time
 from distributed import get_client
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
@@ -16,6 +17,7 @@ from torch.autograd import Variable
 from torch.utils.data import Dataset, IterableDataset, TensorDataset
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
+Number = Union[int, float, np.integer, np.float]
 
 
 def gradient(
@@ -66,6 +68,7 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
+    start = time()
     data_target = [train_set[i] for i in idx]
     _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
     _targets = [d[1] for d in data_target]
@@ -78,7 +81,8 @@ def gradient(
     _loss = loss(outputs, targets)
     _loss.backward()
     grads = {k: v.grad for k, v in model.named_parameters()}
-    return {"_num_data": len(outputs), "_loss": _loss.item(), **grads}
+    elapsed = time() - start
+    return {"_num_data": len(outputs), "_time": elapsed, "_loss": _loss.item(), **grads}
 
 
 class DaskBaseDamper:
@@ -96,6 +100,7 @@ class DaskBaseDamper:
         max_workers=8,
         device: str = "cpu",
         grads_per_worker=32,
+        max_epochs=20,
         **kwargs,
     ):
         self.module = module
@@ -105,6 +110,7 @@ class DaskBaseDamper:
         self.device = device
         self.cluster = cluster
         self.grads_per_worker = grads_per_worker
+        self.max_epochs = max_epochs
 
         self.batch_size = batch_size
         self.max_batch_size = max_batch_size
@@ -141,7 +147,12 @@ class DaskBaseDamper:
         self.module_ = self.module(**module_kwargs)
         self.optimizer_ = self.optimizer(self.module_.parameters(), **opt_kwargs)
         self.loss_ = self.loss(reduction="sum", **loss_kwargs)
-        self.meta_ = {"n_updates": 0, "n_data": 0}
+        self._meta: Dict[str, Number] = {
+            "n_updates": 0,
+            "n_data": 0,
+            "score__calls": 0,
+            "partial_fit__calls": 0,
+        }
         self.initialized_ = True
 
     def batch_size_(self):
@@ -215,13 +226,16 @@ class DaskBaseDamper:
         args = (X, y) if y is not None else (X,)
         return TensorDataset(*args)
 
+    def fit(self, X, y=None, **fit_params):
+        for epoch in range(self.max_epochs):
+            self.partial_fit(X, y=y, **fit_params)
+        return self
+
     def partial_fit(self, X, y=None, **fit_params):
         if not hasattr(self, "initialized_") or not self.initialized_:
             self.initialize()
         self.run_single_epoch(X, y=y, **fit_params)
         return self
-
-    fit = partial_fit
 
     def run_single_epoch(self, X, y=None, **fit_params):
         """
@@ -235,13 +249,12 @@ class DaskBaseDamper:
             Arguments to pass to self.module_.forward
         """
         dataset = self._get_dataset(X, y=y)
-        start_data = copy(self.meta_["n_data"])
+        start_data = copy(self._meta["n_data"])
         while True:
             bs = self.train_step(dataset, **fit_params)
-            self.meta_["n_updates"] += 1
-            self.meta_["n_data"] += bs
-            print(self.meta_)
-            if self.meta_["n_data"] - start_data >= len(X):
+            self._meta["n_updates"] += 1
+            self._meta["n_data"] += bs
+            if self._meta["n_data"] - start_data >= len(X):
                 break
         return True
 
@@ -253,7 +266,7 @@ class DaskBaseDamper:
             for Xi, yi in loader:
                 Xi, yi = Xi.to(self.device), yi.to(self.device)
                 y_hat = self.module_.forward(Xi)
-                _loss += self.loss_(yi.reshape(-1, 1), y_hat).item()
+                _loss += self.loss_(y_hat, yi).item()
         return _loss / len(y)
 
     def _get_gradients(
@@ -311,3 +324,70 @@ class DaskBaseDamper:
         grads = [grad_fn(idx=idx) for idx in worker_idxs]
         out = dask.compute(*grads)
         return out
+
+    @property
+    def meta_(self):
+        return deepcopy(self._meta)
+
+
+class DaskClassifier(DaskBaseDamper):
+    def partial_fit(self, data, target=None):
+        """
+        Runs 1 epoch on the given data and model
+        """
+        start = time()
+        super().partial_fit(data, target=target)
+        stat = {
+            "partial_fit__time": time() - start,
+            "partial_fit__batch_size": self.batch_size_(),
+        }
+        self._meta.update(stat)
+        self._meta["partial_fit__calls"] += 1
+        return self
+
+    def score(self, X, y=None):
+        if not hasattr(self, "initialized_") or not self.initialized_:
+            self.initialize()
+
+        if len(X) == 0:
+            raise ValueError("Pass some data to `score`")
+
+        if isinstance(X, torch.utils.data.Dataset):
+            dataset = X
+            loader = torch.utils.data.DataLoader(dataset, batch_size=1000)
+        elif isinstance(X, torch.utils.data.DataLoader):
+            loader = X
+        else:
+            dataset = self._get_dataset(X, y=y)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=1000)
+
+        correct = 0
+        total = 0
+        _loss = 0
+        start = time()
+
+        with torch.no_grad():
+            for Xi, yi in loader:
+                # loss
+                Xi, yi = Xi.to(self.device), yi.to(self.device)
+                y_hat = self.module_.forward(Xi)
+                _loss += self.loss_(y_hat, yi).item()
+
+                # acc
+                _, index = y_hat.max(1)
+                truth = (index == yi).long()
+                correct += truth.sum()
+                total += truth.shape[0]
+
+        acc = float(correct / total)
+        loss = float(_loss / total)
+
+        # update stats
+        stat = {
+            "score__acc": acc,
+            "score__loss": loss,
+            "score__time": time() - start,
+        }
+        self._meta.update(stat)
+        self._meta["score__calls"] += 1
+        return acc
