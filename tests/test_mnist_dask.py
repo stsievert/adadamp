@@ -29,7 +29,7 @@ class Model(nn.Module):
 
 
 @gen_cluster(client=True)
-async def test_mnist_w_dask(c, s, a, b):
+def test_mnist_w_dask(c, s, a, b):
     N = 4096
     batch_size = 1024
     net = DaskBaseDamper(
@@ -38,7 +38,7 @@ async def test_mnist_w_dask(c, s, a, b):
         optimizer=optim.Adadelta,
         optimizer__lr=1.0,
         batch_size=batch_size,
-        grads_per_worker=batch_size,# // 2,
+        grads_per_worker=batch_size // 2,
         max_epochs=1,
     )
 
@@ -47,5 +47,9 @@ async def test_mnist_w_dask(c, s, a, b):
     )
     dataset = datasets.MNIST("./data", train=True, download=True, transform=transform)
     trimmed = Subset(dataset, np.arange(N).astype(int))
+    #  n, d = 100, 10
+    #  X = np.random.uniform(size=(n, d))
+    #  y = np.random.uniform(size=n)
+    #  _ = net.fit(X, y)
     _ = net.fit(trimmed)
     assert True  # sanity check

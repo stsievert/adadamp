@@ -196,6 +196,7 @@ class DaskBaseDamper:
         model_opt,
         dataset,
         *,
+        loss,
         client,
         epoch_n_data=0,
         len_dataset=None,
@@ -227,6 +228,7 @@ class DaskBaseDamper:
             model_opt,
             dataset,
             batch_size=bs,
+            loss=loss,
             client=client,
             n_workers=self.n_workers_,
             len_dataset=len_dataset,
@@ -276,18 +278,26 @@ class DaskBaseDamper:
         client = get_client()
 
         # Send the model/optimizer to workers
-        model = client.scatter(deepcopy(self.module_.train()))
-        opt = client.scatter(deepcopy(self.optimizer_))
-        model_opt = client.submit(lambda x, y: (x, y), model, opt)
+        m = deepcopy(self.module_.train())
+        m = client.scatter(m)
+        o = deepcopy(self.optimizer_)
+        o = client.scatter(o)
+        model_opt = client.submit(lambda x, y: (x, y), m, o)
 
         # Give all data to each worker
         len_dataset = len(dataset)
         dataset = client.scatter(dataset, broadcast=True)
 
         start_data = copy(self._meta["n_data"])
+        loss = deepcopy(self.loss_)
         while True:
             model_opt, bs = self.train_step(
-                model_opt, dataset, client=client, len_dataset=len_dataset, **fit_params
+                model_opt,
+                dataset,
+                loss=loss,
+                client=client,
+                len_dataset=len_dataset,
+                **fit_params,
             )
             self._meta["n_updates"] += 1
             self._meta["n_data"] += bs
@@ -315,6 +325,7 @@ class DaskBaseDamper:
         model_opt,
         dataset,
         *,
+        loss,
         batch_size,
         client,
         n_workers,
@@ -362,7 +373,7 @@ class DaskBaseDamper:
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
         grads = [
-            client.submit(gradient, model_opt, dataset, loss=self.loss_, idx=idx)
+            client.submit(gradient, model_opt, dataset, loss=loss, idx=idx)
             for idx in worker_idxs
         ]
         return grads
