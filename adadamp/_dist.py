@@ -191,7 +191,16 @@ class DaskBaseDamper:
     def batch_size_(self):
         return self.batch_size
 
-    def train_step(self, model_opt, dataset, *, client, epoch_n_data=0, len_dataset=None, **fit_params):
+    def train_step(
+        self,
+        model_opt,
+        dataset,
+        *,
+        client,
+        epoch_n_data=0,
+        len_dataset=None,
+        **fit_params,
+    ):
         """
         Calculate gradients and take one optimization step.
 
@@ -301,7 +310,15 @@ class DaskBaseDamper:
         return _loss / len(y)
 
     def _get_gradients(
-        self, start_idx, model_opt, dataset, *, batch_size, client, n_workers, len_dataset,
+        self,
+        start_idx,
+        model_opt,
+        dataset,
+        *,
+        batch_size,
+        client,
+        n_workers,
+        len_dataset,
     ):
         """
         Calculates the gradients at a given state. This function is
