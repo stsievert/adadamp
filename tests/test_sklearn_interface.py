@@ -10,6 +10,7 @@ from sklearn.datasets import make_regression
 from torchvision import datasets, transforms
 from torchvision.datasets import FashionMNIST
 from torchvision.transforms import Compose
+from distributed.utils_test import gen_cluster
 
 from adadamp import DaskBaseDamper
 
@@ -114,4 +115,9 @@ def test_sklearn_compatible_estimator(estimator, check, request):
         assert len(shorthand) == 1
         reason = reasons[shorthand[0]]
         pytest.xfail(reason=reason)
-    check(estimator)
+
+    @gen_cluster(client=True)
+    def _test(c, s, a, b):
+        check(estimator)
+        return True
+    assert _test()

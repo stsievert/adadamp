@@ -1,6 +1,6 @@
 from copy import copy, deepcopy
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union, Tuple, NewType
 
 import dask
 import numpy as np
@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.optim import Optimizer
 from time import time
 from distributed import get_client
 from sklearn.base import BaseEstimator
@@ -18,16 +19,18 @@ from torch.utils.data import Dataset, IterableDataset, TensorDataset
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
 Number = Union[int, float, np.integer, np.float]
+Model = NewType("Model", torch.nn.Module)
+Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
 
 
 def gradient(
+    model_opt: Tuple[Model, Optimizer],
     train_set,
     *,
-    model: nn.Module,
     loss: Callable,
     device=torch.device("cpu"),
     idx: IntArray,
-) -> Dict[str, Union[torch.Tensor, int]]:
+) -> Grads:
     r"""
     Compute the model gradient for the function ``loss``.
 
@@ -68,6 +71,7 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
+    model, _ = model_opt
     start = time()
     data_target = [train_set[i] for i in idx]
     _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
@@ -75,14 +79,43 @@ def gradient(
     inputs = torch.cat(_inputs)
     targets = torch.tensor(_targets)
 
-    model.train()
+    assert model.training, "Model should be in training model"
     outputs = model(inputs)
 
     _loss = loss(outputs, targets)
     _loss.backward()
-    grads = {k: v.grad for k, v in model.named_parameters()}
+    grads: Dict[str, torch.Tensor] = {k: v.grad for k, v in model.named_parameters()}
     elapsed = time() - start
-    return {"_num_data": len(outputs), "_time": elapsed, "_loss": _loss.item(), **grads}
+    return {
+        "_num_data": len(outputs),
+        "_time": elapsed,
+        "_loss": float(_loss.item()),
+        **grads,
+    }
+
+
+def _update_model(
+    model_opt: Tuple[Model, Optimizer], grads: List[Grads],
+) -> Tuple[Model, Optimizer]:
+    model, optimizer = model_opt
+
+    # The deepcopy lines might be necessary -- see [1].
+    # [1]:https://stackoverflow.com/questions/65257792/returning-mutated-inputs-with-dask
+    #
+    #  model = deepcopy(model)  # necessary?
+    #  optimizer = deepcopy(optimizer)  # necessary?
+
+    num_data = sum(info["_num_data"] for info in grads)
+
+    # aggregate and update the gradients
+    for name, param in model.named_parameters():
+        grad = sum(g[name] for g in grads)
+        param.grad = grad / num_data
+
+    # update model
+    optimizer.step()
+    optimizer.zero_grad()
+    return model, optimizer
 
 
 class DaskBaseDamper:
@@ -158,7 +191,17 @@ class DaskBaseDamper:
     def batch_size_(self):
         return self.batch_size
 
-    def train_step(self, dataset, client=None, epoch_n_data=0, **fit_params):
+    def train_step(
+        self,
+        model_opt,
+        dataset,
+        *,
+        loss,
+        client,
+        epoch_n_data=0,
+        len_dataset=None,
+        **fit_params,
+    ):
         """
         Calculate gradients and take one optimization step.
 
@@ -174,42 +217,24 @@ class DaskBaseDamper:
         n_data : int
             The number of data processed.
         """
-        # Send the model to workers
-        new_model = deepcopy(self.module_).train()
-        if client:
-            model_future = client.scatter(new_model, broadcast=True)
-        else:
-            model_future = new_model
-
         bs = self.batch_size_()
         self.n_workers_ = bs // self.grads_per_worker
         if self.cluster:
             self.cluster.scale(self.n_workers_)
 
         # compute grads
-        self.optimizer_.zero_grad()
         grads = self._get_gradients(
             epoch_n_data,
-            new_model,
+            model_opt,
             dataset,
             batch_size=bs,
-            n_workers=self.n_workers_,
+            loss=loss,
             client=client,
+            n_workers=self.n_workers_,
+            len_dataset=len_dataset,
         )
-
-        # update SGD
-        num_data = sum(info["_num_data"] for info in grads)
-        assert num_data == bs, "Sanity check on batch size"
-
-        # aggregate and update the gradients
-        #  print(grads)
-        for name, param in self.module_.named_parameters():
-            grad = sum(g[name] for g in grads)
-            param.grad = grad / num_data
-
-        self.optimizer_.step()
-        self.optimizer_.zero_grad()
-        return bs
+        model_opt = client.submit(_update_model, model_opt, grads)
+        return model_opt, bs
 
     def _get_dataset(self, X, y=None) -> Dataset:
         if isinstance(X, Dataset):
@@ -234,6 +259,7 @@ class DaskBaseDamper:
     def partial_fit(self, X, y=None, **fit_params):
         if not hasattr(self, "initialized_") or not self.initialized_:
             self.initialize()
+
         self.run_single_epoch(X, y=y, **fit_params)
         return self
 
@@ -249,13 +275,37 @@ class DaskBaseDamper:
             Arguments to pass to self.module_.forward
         """
         dataset = self._get_dataset(X, y=y)
+        client = get_client()
+
+        # Send the model/optimizer to workers
+        m = deepcopy(self.module_.train())
+        m = client.scatter(m)
+        o = deepcopy(self.optimizer_)
+        o = client.scatter(o)
+        model_opt = client.submit(lambda x, y: (x, y), m, o)
+
+        # Give all data to each worker
+        len_dataset = len(dataset)
+        dataset = client.scatter(dataset, broadcast=True)
+
         start_data = copy(self._meta["n_data"])
+        loss = deepcopy(self.loss_)
         while True:
-            bs = self.train_step(dataset, **fit_params)
+            model_opt, bs = self.train_step(
+                model_opt,
+                dataset,
+                loss=loss,
+                client=client,
+                len_dataset=len_dataset,
+                **fit_params,
+            )
             self._meta["n_updates"] += 1
             self._meta["n_data"] += bs
             if self._meta["n_data"] - start_data >= len(X):
                 break
+        model, opt = model_opt.result()
+        self.module_ = model
+        self.optimizer_ = opt
         return True
 
     def score(self, X, y):
@@ -270,7 +320,16 @@ class DaskBaseDamper:
         return _loss / len(y)
 
     def _get_gradients(
-        self, start_idx, model_future, dataset, batch_size, n_workers, client=None,
+        self,
+        start_idx,
+        model_opt,
+        dataset,
+        *,
+        loss,
+        batch_size,
+        client,
+        n_workers,
+        len_dataset,
     ):
         """
         Calculates the gradients at a given state. This function is
@@ -303,31 +362,28 @@ class DaskBaseDamper:
         n_workers: int
             Number of workers current running
 
-        client : distributed.Client()
-            Dask client used to scheduele workers. Assumes client
-            is backed by some cluster (ie LocalCluster or equiv)
-
         """
         # Iterate through the dataset in batches
         # TODO: integrate with IterableDataset (this is pretty much already
         # an IterableDataset but without vectorization)
-        n = len(dataset)
-        idx = [i % n for i in range(start_idx, start_idx + batch_size)]
+        idx = [i % len_dataset for i in range(start_idx, start_idx + batch_size)]
         worker_idxs = np.array_split(idx, n_workers)
 
         # Distribute the computation of the gradient. In practice this will
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
-        grad_fn = partial(gradient, dataset, model=model_future, loss=self.loss_)
-        grad_fn = dask.delayed(grad_fn)
-
-        grads = [grad_fn(idx=idx) for idx in worker_idxs]
-        out = dask.compute(*grads)
-        return out
+        grads = [
+            client.submit(gradient, model_opt, dataset, loss=loss, idx=idx)
+            for idx in worker_idxs
+        ]
+        return grads
 
     @property
     def meta_(self):
         return deepcopy(self._meta)
+
+    def _get_tags(self):
+        return BaseEstimator()._get_tags()
 
 
 class DaskClassifier(DaskBaseDamper):

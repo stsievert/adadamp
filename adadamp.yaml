@@ -15,6 +15,7 @@ dependencies:
   - torchvision
   - pytest
   - python-snappy
+  - ipykernel  # for use w/ nb_conda_kernels for Jupyter notebooks w/ conda envs
   - pip:
     - sphinx
     - skorch
