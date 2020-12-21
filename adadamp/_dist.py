@@ -142,7 +142,7 @@ class DaskBaseDamper:
         self.loss = loss
         self.optimizer = optimizer
         self.metrics = metrics
-        self.device = torch.device(device)
+        self.device = device
         self.cluster = cluster
         self.grads_per_worker = grads_per_worker
         self.max_epochs = max_epochs
@@ -182,7 +182,7 @@ class DaskBaseDamper:
         loss_kwargs = self._get_kwargs_for("loss")
 
         self.module_ = self.module(**module_kwargs)
-        self.module_.to(self.device)
+        self.module_.to(torch.device(self.device))
         self.optimizer_ = self.optimizer(self.module_.parameters(), **opt_kwargs)
         self.loss_ = self.loss(reduction="sum", **loss_kwargs)
         self._meta: Dict[str, Number] = {
@@ -205,6 +205,7 @@ class DaskBaseDamper:
         client,
         epoch_n_data=0,
         len_dataset=None,
+        device=None,
         **fit_params,
     ):
         """
@@ -237,6 +238,7 @@ class DaskBaseDamper:
             client=client,
             n_workers=self.n_workers_,
             len_dataset=len_dataset,
+            device=device,
         )
         model_opt = client.submit(_update_model, model_opt, grads)
         return model_opt, bs
@@ -253,10 +255,11 @@ class DaskBaseDamper:
         if isinstance(y, np.ndarray):
             y = torch.from_numpy(y)
 
+        device = torch.device(self.device)
         args = (
-            (X.to(self.device), y.to(self.device))
+            (X.to(device), y.to(device))
             if y is not None
-            else (X.to(self.device),)
+            else (X.to(device),)
         )
         return TensorDataset(*args)
 
@@ -299,6 +302,7 @@ class DaskBaseDamper:
 
         start_data = copy(self._meta["n_data"])
         loss = deepcopy(self.loss_)
+        device = torch.device(self.device)
         while True:
             model_opt, bs = self.train_step(
                 model_opt,
@@ -306,6 +310,7 @@ class DaskBaseDamper:
                 loss=loss,
                 client=client,
                 len_dataset=len_dataset,
+                device=device,
                 **fit_params,
             )
             self._meta["n_updates"] += 1
@@ -320,10 +325,11 @@ class DaskBaseDamper:
     def score(self, X, y):
         dataset = self._get_dataset(X, y=y)
         loader = torch.utils.data.DataLoader(dataset, batch_size=1000)
+        device = torch.device(self.device)
         with torch.no_grad():
             _loss = 0
             for Xi, yi in loader:
-                Xi, yi = Xi.to(self.device), yi.to(self.device)
+                Xi, yi = Xi.to(device), yi.to(device)
                 y_hat = self.module_.forward(Xi)
                 _loss += self.loss_(y_hat, yi).item()
         return _loss / len(y)
@@ -339,6 +345,7 @@ class DaskBaseDamper:
         client,
         n_workers,
         len_dataset,
+        device,
     ):
         """
         Calculates the gradients at a given state. This function is
@@ -383,7 +390,7 @@ class DaskBaseDamper:
         # for ease it's a small network that doesn't need much acceleration.
         grads = [
             client.submit(
-                gradient, model_opt, dataset, device=self.device, loss=loss, idx=idx
+                gradient, model_opt, dataset, device=device, loss=loss, idx=idx
             )
             for idx in worker_idxs
         ]
