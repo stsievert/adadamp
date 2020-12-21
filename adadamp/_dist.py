@@ -135,7 +135,6 @@ class DaskBaseDamper:
         device: str = "cpu",
         grads_per_worker=32,
         max_epochs=20,
-        client=None,
         **kwargs,
     ):
         self.module = module
@@ -151,7 +150,6 @@ class DaskBaseDamper:
         self.max_batch_size = max_batch_size
         self.min_workers = min_workers
         self.max_workers = max_workers
-        self.client = client
 
         for k, v in kwargs.items():
             setattr(self, k, v)
@@ -287,7 +285,7 @@ class DaskBaseDamper:
             Arguments to pass to self.module_.forward
         """
         dataset = self._get_dataset(X, y=y)
-        client = self.client
+        client = get_client()
 
         # Send the model/optimizer to workers
         m = deepcopy(self.module_.train())
