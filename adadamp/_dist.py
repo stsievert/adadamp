@@ -405,12 +405,12 @@ class DaskBaseDamper:
 
 
 class DaskClassifier(DaskBaseDamper):
-    def partial_fit(self, data, y=None):
+    def partial_fit(self, X, y=None, **fit_params):
         """
         Runs 1 epoch on the given data and model
         """
         start = time()
-        super().partial_fit(data, y=y)
+        super().partial_fit(X, y=y, **fit_params)
         stat = {
             "partial_fit__time": time() - start,
             "partial_fit__batch_size": self.batch_size_(),
