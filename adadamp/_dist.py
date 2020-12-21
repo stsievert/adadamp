@@ -13,7 +13,7 @@ from time import time
 from distributed import get_client
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
-from skorch import NeuralNet
+# from skorch import NeuralNet
 from torch.autograd import Variable
 from torch.utils.data import Dataset, IterableDataset, TensorDataset
 
@@ -76,8 +76,8 @@ def gradient(
     data_target = [train_set[i] for i in idx]
     _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
     _targets = [d[1] for d in data_target]
-    inputs = torch.cat(_inputs)
-    targets = torch.tensor(_targets)
+    inputs = torch.cat(_inputs).to(device)
+    targets = torch.tensor(_targets).to(device)
 
     assert model.training, "Model should be in training model"
     outputs = model(inputs)
@@ -134,13 +134,14 @@ class DaskBaseDamper:
         device: str = "cpu",
         grads_per_worker=32,
         max_epochs=20,
-        **kwargs,
+        client=None,
+        **kwargs,  
     ):
         self.module = module
         self.loss = loss
         self.optimizer = optimizer
         self.metrics = metrics
-        self.device = device
+        self.device = torch.device(device)
         self.cluster = cluster
         self.grads_per_worker = grads_per_worker
         self.max_epochs = max_epochs
@@ -149,6 +150,8 @@ class DaskBaseDamper:
         self.max_batch_size = max_batch_size
         self.min_workers = min_workers
         self.max_workers = max_workers
+        self.client = client
+        
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -178,6 +181,7 @@ class DaskBaseDamper:
         loss_kwargs = self._get_kwargs_for("loss")
 
         self.module_ = self.module(**module_kwargs)
+        self.module_.to(self.device)
         self.optimizer_ = self.optimizer(self.module_.parameters(), **opt_kwargs)
         self.loss_ = self.loss(reduction="sum", **loss_kwargs)
         self._meta: Dict[str, Number] = {
@@ -247,8 +251,8 @@ class DaskBaseDamper:
             y = np.ndarray(y)
         if isinstance(y, np.ndarray):
             y = torch.from_numpy(y)
-
-        args = (X, y) if y is not None else (X,)
+        
+        args = (X.to(self.device), y.to(self.device)) if y is not None else (X.to(self.device),)
         return TensorDataset(*args)
 
     def fit(self, X, y=None, **fit_params):
@@ -275,8 +279,8 @@ class DaskBaseDamper:
             Arguments to pass to self.module_.forward
         """
         dataset = self._get_dataset(X, y=y)
-        client = get_client()
-
+        client = self.client
+        
         # Send the model/optimizer to workers
         m = deepcopy(self.module_.train())
         m = client.scatter(m)
@@ -373,7 +377,7 @@ class DaskBaseDamper:
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
         grads = [
-            client.submit(gradient, model_opt, dataset, loss=loss, idx=idx)
+            client.submit(gradient, model_opt, dataset, device=self.device, loss=loss, idx=idx)
             for idx in worker_idxs
         ]
         return grads
@@ -387,12 +391,13 @@ class DaskBaseDamper:
 
 
 class DaskClassifier(DaskBaseDamper):
-    def partial_fit(self, data, target=None):
+    
+    def partial_fit(self, data, y=None):
         """
         Runs 1 epoch on the given data and model
         """
         start = time()
-        super().partial_fit(data, target=target)
+        super().partial_fit(data, y=y)
         stat = {
             "partial_fit__time": time() - start,
             "partial_fit__batch_size": self.batch_size_(),
@@ -447,3 +452,28 @@ class DaskClassifier(DaskBaseDamper):
         self._meta.update(stat)
         self._meta["score__calls"] += 1
         return acc
+
+class DaskClassifierIncreasingLR(DaskClassifier):
+    
+    def fit(self, X, y=None, **fit_params):
+        
+        if not hasattr(self, "initialized_") or not self.initialized_:
+            self.initialize()
+            
+        self.curr_metas = []
+        
+        print('Initial Learning Rate:', self.optimizer_.param_groups[0]['lr'])
+        
+        for epoch in range(1, self.max_epochs + 1):
+            
+            if epoch % 60 == 0:
+                for g in self.optimizer_.param_groups:
+                    g['lr'] = g['lr'] / 5
+                    print('Updated Learning Rate:', g['lr'])
+                
+            self.partial_fit(X, y=y, **fit_params)
+            acc = self.score(X, y=y)
+            
+            self.curr_metas.append(deepcopy(self._meta))
+            print('Epoch: {} (acc: {})'.format(epoch, acc))
+        return self
