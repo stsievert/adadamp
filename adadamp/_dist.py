@@ -14,7 +14,6 @@ from distributed import get_client
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
 
-# from skorch import NeuralNet
 from torch.autograd import Variable
 from torch.utils.data import Dataset, IterableDataset, TensorDataset
 
