@@ -13,6 +13,7 @@ from time import time
 from distributed import get_client
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
+
 # from skorch import NeuralNet
 from torch.autograd import Variable
 from torch.utils.data import Dataset, IterableDataset, TensorDataset
@@ -135,7 +136,7 @@ class DaskBaseDamper:
         grads_per_worker=32,
         max_epochs=20,
         client=None,
-        **kwargs,  
+        **kwargs,
     ):
         self.module = module
         self.loss = loss
@@ -151,7 +152,7 @@ class DaskBaseDamper:
         self.min_workers = min_workers
         self.max_workers = max_workers
         self.client = client
-        
+
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -251,8 +252,12 @@ class DaskBaseDamper:
             y = np.ndarray(y)
         if isinstance(y, np.ndarray):
             y = torch.from_numpy(y)
-        
-        args = (X.to(self.device), y.to(self.device)) if y is not None else (X.to(self.device),)
+
+        args = (
+            (X.to(self.device), y.to(self.device))
+            if y is not None
+            else (X.to(self.device),)
+        )
         return TensorDataset(*args)
 
     def fit(self, X, y=None, **fit_params):
@@ -280,7 +285,7 @@ class DaskBaseDamper:
         """
         dataset = self._get_dataset(X, y=y)
         client = self.client
-        
+
         # Send the model/optimizer to workers
         m = deepcopy(self.module_.train())
         m = client.scatter(m)
@@ -377,7 +382,9 @@ class DaskBaseDamper:
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
         grads = [
-            client.submit(gradient, model_opt, dataset, device=self.device, loss=loss, idx=idx)
+            client.submit(
+                gradient, model_opt, dataset, device=self.device, loss=loss, idx=idx
+            )
             for idx in worker_idxs
         ]
         return grads
@@ -391,7 +398,6 @@ class DaskBaseDamper:
 
 
 class DaskClassifier(DaskBaseDamper):
-    
     def partial_fit(self, data, y=None):
         """
         Runs 1 epoch on the given data and model
@@ -453,27 +459,27 @@ class DaskClassifier(DaskBaseDamper):
         self._meta["score__calls"] += 1
         return acc
 
+
 class DaskClassifierIncreasingLR(DaskClassifier):
-    
     def fit(self, X, y=None, **fit_params):
-        
+
         if not hasattr(self, "initialized_") or not self.initialized_:
             self.initialize()
-            
+
         self.curr_metas = []
-        
-        print('Initial Learning Rate:', self.optimizer_.param_groups[0]['lr'])
-        
+
+        print("Initial Learning Rate:", self.optimizer_.param_groups[0]["lr"])
+
         for epoch in range(1, self.max_epochs + 1):
-            
+
             if epoch % 60 == 0:
                 for g in self.optimizer_.param_groups:
-                    g['lr'] = g['lr'] / 5
-                    print('Updated Learning Rate:', g['lr'])
-                
+                    g["lr"] = g["lr"] / 5
+                    print("Updated Learning Rate:", g["lr"])
+
             self.partial_fit(X, y=y, **fit_params)
             acc = self.score(X, y=y)
-            
+
             self.curr_metas.append(deepcopy(self._meta))
-            print('Epoch: {} (acc: {})'.format(epoch, acc))
+            print("Epoch: {} (acc: {})".format(epoch, acc))
         return self
