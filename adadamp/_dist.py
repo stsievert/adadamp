@@ -149,6 +149,7 @@ class DaskBaseDamper:
         self.max_batch_size = max_batch_size
         self.min_workers = min_workers
         self.max_workers = max_workers
+        self.n_workers_ = min_workers
 
         for k, v in kwargs.items():
             setattr(self, k, v)
@@ -187,6 +188,7 @@ class DaskBaseDamper:
             "n_data": 0,
             "score__calls": 0,
             "partial_fit__calls": 0,
+            "n_workers": self.n_workers_,
         }
         self.initialized_ = True
 
@@ -224,6 +226,8 @@ class DaskBaseDamper:
         self.n_workers_ = bs // self.grads_per_worker
         if self.cluster:
             self.cluster.scale(self.n_workers_)
+            
+        self._meta.update({ "n_workers": self.n_workers_ })
 
         # compute grads
         grads = self._get_gradients(
