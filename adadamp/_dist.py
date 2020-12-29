@@ -468,26 +468,17 @@ class DaskClassifier(DaskBaseDamper):
         return acc
 
 
-class DaskClassifierIncreasingLR(DaskClassifier):
-    def fit(self, X, y=None, **fit_params):
-
-        if not hasattr(self, "initialized_") or not self.initialized_:
-            self.initialize()
-
-        self.curr_metas = []
-
-        print("Initial Learning Rate:", self.optimizer_.param_groups[0]["lr"])
-
-        for epoch in range(1, self.max_epochs + 1):
-
-            if epoch % 60 == 0:
-                for g in self.optimizer_.param_groups:
-                    g["lr"] = g["lr"] / 5
-                    print("Updated Learning Rate:", g["lr"])
-
-            self.partial_fit(X, y=y, **fit_params)
-            acc = self.score(X, y=y)
-
-            self.curr_metas.append(deepcopy(self._meta))
-            print("Epoch: {} (acc: {})".format(epoch, acc))
-        return self
+class DaskClassifierExpiriments(DaskClassifier):
+    
+    def set_lr(self, lr):
+        """
+        Sets LR to passed value
+        """
+        for g in self.optimizer_.param_groups:
+            g["lr"] = lr
+    
+    def set_bs(self, bs):
+        """
+        Updates batch size
+        """
+        self.batch_size = bs
