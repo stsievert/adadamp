@@ -10,7 +10,7 @@ from .damping import (
     GradientDescent,
     ConvergenceError,
 )
-from ._dist import DaskBaseDamper, DaskClassifier
+from ._dist import DaskBaseDamper, DaskClassifier, DaskGeoDamp
 from .utils import _get_resnet18
 
 __all__ = [

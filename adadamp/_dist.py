@@ -118,6 +118,18 @@ def _update_model(
     return model, optimizer
 
 
+def _decay_lr(
+    model_opt: Tuple[Model, Optimizer], factor: float
+) -> Tuple[Model, Optimizer]:
+    """
+    Decay the learning rate by ``factor``.
+    """
+    model, opt = model_opt
+    for group in opt.param_groups:
+        group["lr"] /= factor
+    return model, opt
+
+
 class DaskBaseDamper:
     def __init__(
         self,
@@ -188,7 +200,7 @@ class DaskBaseDamper:
         }
         self.initialized_ = True
 
-    def batch_size_(self):
+    def damping_(self):
         return self.batch_size
 
     def train_step(
@@ -217,7 +229,12 @@ class DaskBaseDamper:
         n_data : int
             The number of data processed.
         """
-        bs = self.batch_size_()
+        bs = self.damping_()
+        if bs >= self.max_batch_size:
+            factor = bs / self.max_batch_size
+            model_opt = client.submit(_decay_lr, model_opt, factor=factor)
+            bs = self.max_batch_size
+
         self.n_workers_ = bs // self.grads_per_worker
         if self.cluster:
             self.cluster.scale(self.n_workers_)
@@ -386,6 +403,15 @@ class DaskBaseDamper:
         return BaseEstimator()._get_tags()
 
 
+class DaskGeoDamp(DaskBaseDamper):
+    def damping_(self):
+        epochs = self._meta["num_data"] / self._meta["len_dataset"]
+        factor = self.damping_factor
+        delay = self.damping_delay
+        damping = self.batch_size * (factor ** (epochs // delay))
+        return damping
+
+
 class DaskClassifier(DaskBaseDamper):
     def partial_fit(self, data, target=None):
         """
@@ -395,7 +421,7 @@ class DaskClassifier(DaskBaseDamper):
         super().partial_fit(data, target=target)
         stat = {
             "partial_fit__time": time() - start,
-            "partial_fit__batch_size": self.batch_size_(),
+            "partial_fit__damping": self.damping_(),
         }
         self._meta.update(stat)
         self._meta["partial_fit__calls"] += 1

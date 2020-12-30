@@ -12,6 +12,8 @@ from torchvision.datasets import FashionMNIST
 from torchvision.transforms import Compose
 from distributed.utils_test import gen_cluster
 
+from sklearn.utils.estimator_checks import check_estimator
+
 from adadamp import DaskBaseDamper
 
 
@@ -62,8 +64,6 @@ def test_numpy_data(X, y):
     )
     net.get_params()
     net.fit(X, y)
-
-from sklearn.utils.estimator_checks import check_estimator
 
 
 class SklearnComptabilityNet(nn.Module):
