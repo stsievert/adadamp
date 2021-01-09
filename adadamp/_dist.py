@@ -22,6 +22,11 @@ Number = Union[int, float, np.integer, np.float]
 Model = NewType("Model", torch.nn.Module)
 Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
 
+def get_model_weights(model):
+    s = 0
+    for param in model.parameters():
+        s += torch.abs(torch.sum(param)).item()
+    return s
 
 def gradient(
     model_opt: Tuple[Model, Optimizer],
@@ -95,26 +100,40 @@ def gradient(
 
 
 def _update_model(
-    model_opt: Tuple[Model, Optimizer], grads: List[Grads],
-) -> Tuple[Model, Optimizer]:
+    model_opt: Tuple[Model, Optimizer], grads: List[Grads]) -> Tuple[Model, Optimizer]:
+        
     model, optimizer = model_opt
+    print("Initial Model Weights:\t\t", get_model_weights(model)) # always same value coming in
 
     # The deepcopy lines might be necessary -- see [1].
     # [1]:https://stackoverflow.com/questions/65257792/returning-mutated-inputs-with-dask
     #
-    #  model = deepcopy(model)  # necessary?
-    #  optimizer = deepcopy(optimizer)  # necessary?
+    # uncommenting these lines does not solve problem immidiately
+    # model = deepcopy(model)  # necessary?
+    # optimizer = deepcopy(optimizer)  # necessary?
 
     num_data = sum(info["_num_data"] for info in grads)
+    
+    # grads = dictionary of layer -> layer grad mappings
+    # named_parameters = dicitonary of layer -> weight mappings
 
     # aggregate and update the gradients
     for name, param in model.named_parameters():
-        grad = sum(g[name] for g in grads)
+        grad = sum(g[name] for g in grads) # sums together all grads for this layer
         param.grad = grad / num_data
-
+    
     # update model
     optimizer.step()
     optimizer.zero_grad()
+    
+    # grads should be zero now
+    for name, param in model.named_parameters():
+        # print("Zero'd grads:", param.grad)
+        # Param.grad does not equal zero, so I do not think the model and the optimizer are connected
+        pass
+    
+    print("New Model Weights:\t\t", get_model_weights(model)) # always different than initial model weights    
+    
     return model, optimizer
 
 
@@ -242,6 +261,7 @@ class DaskBaseDamper:
             device=device,
         )
         model_opt = client.submit(_update_model, model_opt, grads)
+        
         return model_opt, bs
 
     def _get_dataset(self, X, y=None) -> Dataset:
