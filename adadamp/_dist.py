@@ -103,7 +103,6 @@ def _update_model(
     model_opt: Tuple[Model, Optimizer], grads: List[Grads]) -> Tuple[Model, Optimizer]:
         
     model, optimizer = model_opt
-    print("Initial Model Weights:\t\t", get_model_weights(model)) # always same value coming in
 
     # The deepcopy lines might be necessary -- see [1].
     # [1]:https://stackoverflow.com/questions/65257792/returning-mutated-inputs-with-dask
@@ -125,14 +124,6 @@ def _update_model(
     # update model
     optimizer.step()
     optimizer.zero_grad()
-    
-    # grads should be zero now
-    for name, param in model.named_parameters():
-        # print("Zero'd grads:", param.grad)
-        # Param.grad does not equal zero, so I do not think the model and the optimizer are connected
-        pass
-    
-    print("New Model Weights:\t\t", get_model_weights(model)) # always different than initial model weights    
     
     return model, optimizer
 
@@ -311,10 +302,21 @@ class DaskBaseDamper:
         client = get_client()
 
         # Send the model/optimizer to workers
-        m = deepcopy(self.module_.train())
+        
+        # Old way might not work
+        #  https://discuss.pytorch.org/t/does-deepcopying-optimizer-of-one-model-works-across-the-model-or-should-i-create-new-optimizer-every-time/14359
+        module_kwargs = self._get_kwargs_for("module")
+        m = self.module(**module_kwargs)
+        m.to(torch.device(self.device))
+        m.load_state_dict(self.module_.train().state_dict())
+        
+        opt_kwargs = self._get_kwargs_for("optimizer")
+        o = self.optimizer(m.parameters(), **opt_kwargs)
+        o.load_state_dict(self.optimizer_.state_dict())
+        
         m = client.scatter(m)
-        o = deepcopy(self.optimizer_)
         o = client.scatter(o)
+        
         model_opt = client.submit(lambda x, y: (x, y), m, o)
 
         # Give all data to each worker
