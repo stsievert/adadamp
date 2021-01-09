@@ -103,18 +103,10 @@ def _update_model(
     model_opt: Tuple[Model, Optimizer], grads: List[Grads]) -> Tuple[Model, Optimizer]:
         
     model, optimizer = model_opt
-
-    # The deepcopy lines might be necessary -- see [1].
-    # [1]:https://stackoverflow.com/questions/65257792/returning-mutated-inputs-with-dask
-    #
-    # uncommenting these lines does not solve problem immidiately
-    # model = deepcopy(model)  # necessary?
-    # optimizer = deepcopy(optimizer)  # necessary?
-
     num_data = sum(info["_num_data"] for info in grads)
     
-    # grads = dictionary of layer -> layer grad mappings
-    # named_parameters = dicitonary of layer -> weight mappings
+    # get initial weights
+    opt_weights = get_model_weights(model)
 
     # aggregate and update the gradients
     for name, param in model.named_parameters():
@@ -124,6 +116,9 @@ def _update_model(
     # update model
     optimizer.step()
     optimizer.zero_grad()
+    
+    # check update applied
+    assert opt_weights != get_model_weights(model), "ERROR: _update_model did not change model weights"
     
     return model, optimizer
 
@@ -300,32 +295,36 @@ class DaskBaseDamper:
         """
         dataset = self._get_dataset(X, y=y)
         client = get_client()
-
-        # Send the model/optimizer to workers
         
-        # Old way might not work
-        #  https://discuss.pytorch.org/t/does-deepcopying-optimizer-of-one-model-works-across-the-model-or-should-i-create-new-optimizer-every-time/14359
+        # copy model
         module_kwargs = self._get_kwargs_for("module")
         m = self.module(**module_kwargs)
         m.to(torch.device(self.device))
         m.load_state_dict(self.module_.train().state_dict())
         
+        # copy optimizer
         opt_kwargs = self._get_kwargs_for("optimizer")
         o = self.optimizer(m.parameters(), **opt_kwargs)
         o.load_state_dict(self.optimizer_.state_dict())
         
+        # track weights
+        prev_weights = get_model_weights(m)
+        
+        # Send the model/optimizer to workers
         m = client.scatter(m)
         o = client.scatter(o)
-        
         model_opt = client.submit(lambda x, y: (x, y), m, o)
 
         # Give all data to each worker
         len_dataset = len(dataset)
         dataset = client.scatter(dataset, broadcast=True)
 
+        # Track when we have moved through dataset
         start_data = copy(self._meta["n_data"])
         loss = deepcopy(self.loss_)
         device = torch.device(self.device)
+        
+        # Run BS items through until hitting every element in dataset
         while True:
             model_opt, bs = self.train_step(
                 model_opt,
@@ -336,13 +335,26 @@ class DaskBaseDamper:
                 device=device,
                 **fit_params,
             )
+            
+            # check for weight update
+            model, _ = model_opt.result()
+            new_weights = get_model_weights(model)
+            assert prev_weights != new_weights, "ERROR: Model weights not changed after batch update"
+            prev_weights = new_weights
+            
+            # exit condition
             self._meta["n_updates"] += 1
             self._meta["n_data"] += bs
             if self._meta["n_data"] - start_data >= len(X):
                 break
-        model, opt = model_opt.result()
-        self.module_ = model
+            
+        # check weights updated and update model
+        new_model, opt = model_opt.result()
+        assert get_model_weights(self.module_) != get_model_weights(new_model), "ERROR: Model weights not changed after train step"
+        
+        self.module_ = new_model
         self.optimizer_ = opt
+        
         return True
 
     def score(self, X, y):
@@ -437,6 +449,7 @@ class DaskClassifier(DaskBaseDamper):
         stat = {
             "partial_fit__time": time() - start,
             "partial_fit__batch_size": self.batch_size_(),
+            "weight_aggregate": get_model_weights(self.module_)
         }
         self._meta.update(stat)
         self._meta["partial_fit__calls"] += 1
