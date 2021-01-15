@@ -37,7 +37,9 @@ def get_model_grads(model):
     return t
 
 def gradient(
-    model_opt: Tuple[Model, Optimizer],
+    m_state,
+    m_class,
+    m_args,
     train_set,
     *,
     loss: Callable,
@@ -84,7 +86,19 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
-    model, _ = model_opt
+    
+    # Workaround: Gradients should be cleared when entering this funciton, 
+    #     but at this moment this behavior is not occuring
+    model = m_class(**m_args)
+    model.load_state_dict(m_state)
+    model.to(torch.device('cuda'))
+    
+    for param in model.parameters():
+        if param.grad is not None:
+            param.grad *= 0
+            
+    # print(id(model)) 
+    
     start = time()
     data_target = [train_set[i] for i in idx]
     _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
@@ -93,7 +107,7 @@ def gradient(
     targets = torch.tensor(_targets).to(device)
 
     assert model.training, "Model should be in training model"
-    assert get_model_grads(model) == 0, "Gradients not cleared before loss.backward()"
+    # assert get_model_grads(model) == 0, "Gradients not cleared before loss.backward()"
     
     outputs = model(inputs)
 
@@ -119,8 +133,6 @@ def _update_model(
     
     # get initial weights
     opt_weights = get_model_weights(model)
-
-    print("Updating model")
     
     # aggregate and update the gradients
     for name, param in model.named_parameters():
@@ -250,10 +262,17 @@ class DaskBaseDamper:
             
         self._meta.update({ "n_workers": self.n_workers_ })
 
+        model, _ = model_opt.result()
+        m_state = model.state_dict()
+        m_class = self.module
+        m_args = self._get_kwargs_for("module")
+        
         # compute grads
         grads = self._get_gradients(
             epoch_n_data,
-            model_opt,
+            m_state,
+            m_class,
+            m_args,
             dataset,
             batch_size=bs,
             loss=loss,
@@ -316,12 +335,12 @@ class DaskBaseDamper:
         dataset = self._get_dataset(X, y=y)
         client = get_client()
         
-        # copy model
+         # copy model
         module_kwargs = self._get_kwargs_for("module")
         m = self.module(**module_kwargs)
         m.to(torch.device(self.device))
         m.load_state_dict(self.module_.train().state_dict())
-        
+
         # copy optimizer
         opt_kwargs = self._get_kwargs_for("optimizer")
         o = self.optimizer(m.parameters(), **opt_kwargs)
@@ -350,7 +369,7 @@ class DaskBaseDamper:
         # Run BS items through until hitting every element in dataset
         curr_b = 0
         while True:
-            print("Current Batch:", curr_b)
+            #print("Current Batch:", curr_b)
             curr_b += 1
             model_opt, bs = self.train_step(
                 model_opt,
@@ -401,7 +420,9 @@ class DaskBaseDamper:
     def _get_gradients(
         self,
         start_idx,
-        model_opt,
+        m_state,
+        m_class,
+        m_args,
         dataset,
         *,
         loss,
@@ -454,7 +475,7 @@ class DaskBaseDamper:
         # for ease it's a small network that doesn't need much acceleration.
         grads = [
             client.submit(
-                gradient, model_opt, dataset, device=device, loss=loss, idx=idx
+                gradient, m_state, m_class, m_args, dataset, device=device, loss=loss, idx=idx
             )
             for idx in worker_idxs
         ]
