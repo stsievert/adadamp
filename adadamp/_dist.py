@@ -37,9 +37,7 @@ def get_model_grads(model):
     return t
 
 def gradient(
-    m_state,
-    m_class,
-    m_args,
+    model_opt: Tuple[Model, Optimizer],
     train_set,
     *,
     loss: Callable,
@@ -89,9 +87,8 @@ def gradient(
     
     # Workaround: Gradients should be cleared when entering this funciton, 
     #     but at this moment this behavior is not occuring
-    model = m_class(**m_args)
-    model.load_state_dict(m_state)
-    model.to(torch.device('cuda'))
+    old_model, _ = model_opt
+    model = deepcopy(old_model)
     
     for param in model.parameters():
         if param.grad is not None:
@@ -262,17 +259,10 @@ class DaskBaseDamper:
             
         self._meta.update({ "n_workers": self.n_workers_ })
 
-        model, _ = model_opt.result()
-        m_state = model.state_dict()
-        m_class = self.module
-        m_args = self._get_kwargs_for("module")
-        
         # compute grads
         grads = self._get_gradients(
             epoch_n_data,
-            m_state,
-            m_class,
-            m_args,
+            model_opt,
             dataset,
             batch_size=bs,
             loss=loss,
@@ -420,9 +410,7 @@ class DaskBaseDamper:
     def _get_gradients(
         self,
         start_idx,
-        m_state,
-        m_class,
-        m_args,
+        model_opt,
         dataset,
         *,
         loss,
@@ -475,7 +463,7 @@ class DaskBaseDamper:
         # for ease it's a small network that doesn't need much acceleration.
         grads = [
             client.submit(
-                gradient, m_state, m_class, m_args, dataset, device=device, loss=loss, idx=idx
+                gradient, model_opt, dataset, device=device, loss=loss, idx=idx
             )
             for idx in worker_idxs
         ]
