@@ -90,9 +90,9 @@ def gradient(
     old_model, _ = model_opt
     model = deepcopy(old_model)
     
-    for param in model.parameters():
-        if param.grad is not None:
-            param.grad *= 0
+    if get_model_grads(model) != 0:
+        assert False, "ERROR Gradients not zero'd at grad time"
+        print("NOTE: Gradients not zero'd at grad time")
             
     # print(id(model)) 
     
@@ -272,9 +272,12 @@ class DaskBaseDamper:
             device=device,
         )
         
+        m_init, _ = model_opt.result()
+        m_init_weight = get_model_weights(m_init)
         model_opt = client.submit(_update_model, model_opt, grads)
         m, o = model_opt.result()
         
+        assert m_init_weight != get_model_weights(m), "ERROR: Update model does not change model weights"  
         assert get_model_grads(m) == 0, "ERROR: Gradients not cleared after model update"
         
         return model_opt, bs
