@@ -373,6 +373,7 @@ class DaskBaseDamper:
                 device=device,
                 **fit_params,
             )
+
             
             # check for weight update
             model, opt = model_opt.result()
