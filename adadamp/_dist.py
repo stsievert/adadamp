@@ -37,9 +37,23 @@ def get_model_grads(model):
             t += s
     return t
 
+def set_random_seed(seed, device):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    random.seed(seed)
+    
+    if not isinstance(device, str):
+        device = device.type
+    
+    if 'cuda' in device:
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+
 def gradient(
     model_opt: Tuple[Model, Optimizer],
     train_set,
+    seed,
     *,
     loss: Callable,
     device=torch.device("cpu"),
@@ -85,6 +99,10 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
+    
+    # check seed
+    if seed is not None:
+        set_random_seed(seed, device.type)
     
     # Workaround: Gradients should be cleared when entering this funciton, 
     #     but at this moment this behavior is not occuring
@@ -182,20 +200,13 @@ class DaskBaseDamper:
         self.min_workers = min_workers
         self.max_workers = max_workers
         self.n_workers_ = min_workers
+        self.seed = random_state
 
         for k, v in kwargs.items():
             setattr(self, k, v)
             
-        if random_state is not None:
-            
-            np.random.seed(random_state)
-            torch.manual_seed(random_state)
-            random.seed(random_state)
-            
-            if 'cuda' in device:
-                torch.cuda.manual_seed_all(random_state)
-                torch.backends.cudnn.benchmark = False
-                torch.backends.cudnn.deterministic = True
+        if self.seed is not None:
+            set_random_seed(self.seed, device)
             
         self.initialize();
 
@@ -482,7 +493,7 @@ class DaskBaseDamper:
         # for ease it's a small network that doesn't need much acceleration.
         grads = [
             client.submit(
-                gradient, model_opt, dataset, device=device, loss=loss, idx=idx
+                gradient, model_opt, dataset, self.seed, device=device, loss=loss, idx=idx
             )
             for idx in worker_idxs
         ]
