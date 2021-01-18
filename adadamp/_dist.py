@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import random
 from torch.optim import Optimizer
 from time import time
 from distributed import get_client
@@ -164,6 +165,7 @@ class DaskBaseDamper:
         device: str = "cpu",
         grads_per_worker=32,
         max_epochs=20,
+        random_state=None,
         **kwargs,
     ):
         self.module = module
@@ -183,6 +185,19 @@ class DaskBaseDamper:
 
         for k, v in kwargs.items():
             setattr(self, k, v)
+            
+        if random_state is not None:
+            
+            np.random.seed(random_state)
+            torch.manual_seed(random_state)
+            random.seed(random_state)
+            
+            if 'cuda' in device:
+                torch.cuda.manual_seed_all(random_state)
+                torch.backends.cudnn.benchmark = False
+                torch.backends.cudnn.deterministic = True
+            
+        self.initialize();
 
     def _get_param_names(self):
         return [k for k in self.__dict__ if k[0] != "_" and k[-1] != "_"]
