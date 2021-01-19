@@ -239,6 +239,7 @@ class DaskBaseDamper:
         self._meta: Dict[str, Number] = {
             "n_updates": 0,
             "n_data": 0,
+            "n_weight_changes": 0,
             "score__calls": 0,
             "partial_fit__calls": 0,
             "n_workers": self.n_workers_,
@@ -365,9 +366,6 @@ class DaskBaseDamper:
         
         assert get_model_grads(m) == 0, "ERROR: Gradients not zero'd at copy time"
         
-        # track weights
-        prev_weights = get_model_weights(m)
-        
         # Send the model/optimizer to workers
         m = client.scatter(m)
         o = client.scatter(o)
@@ -383,10 +381,8 @@ class DaskBaseDamper:
         device = torch.device(self.device)
         
         # Run BS items through until hitting every element in dataset
-        curr_b = 0
+        prev_weights = 0
         while True:
-            #print("Current Batch:", curr_b)
-            curr_b += 1
             model_opt, bs = self.train_step(
                 model_opt,
                 dataset,
@@ -400,8 +396,9 @@ class DaskBaseDamper:
             
             # check for weight update
             model, opt = model_opt.result()
+            
             new_weights = get_model_weights(model)
-            assert prev_weights != new_weights, "ERROR: Model weights not changed after batch update"
+            weights_changed = new_weights != prev_weights
             prev_weights = new_weights
             
             # check grads
@@ -410,6 +407,8 @@ class DaskBaseDamper:
             # exit condition
             self._meta["n_updates"] += 1
             self._meta["n_data"] += bs
+            if weights_changed:
+                self._meta["n_weight_changes"] += 1
             if self._meta["n_data"] - start_data >= len(X):
                 break
             
