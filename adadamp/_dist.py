@@ -36,24 +36,19 @@ def get_model_grads(model):
             s = torch.abs(torch.sum(param.grad)).item()
             t += s
     return t
+        
 
-def set_random_seed(seed, device):
+def _set_random_state(seed: int, device="cuda") -> bool:
     np.random.seed(seed)
     torch.manual_seed(seed)
     random.seed(seed)
     
-    if not isinstance(device, str):
-        device = device.type
-    
-    if 'cuda' in device:
+    if "cuda" in device:
         torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
 
 def gradient(
     model_opt: Tuple[Model, Optimizer],
     train_set,
-    seed,
     *,
     loss: Callable,
     device=torch.device("cpu"),
@@ -99,10 +94,6 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
-    
-    # check seed
-    if seed is not None:
-        set_random_seed(seed, device.type)
     
     # Workaround: Gradients should be cleared when entering this funciton, 
     #     but at this moment this behavior is not occuring
@@ -200,13 +191,10 @@ class DaskBaseDamper:
         self.min_workers = min_workers
         self.max_workers = max_workers
         self.n_workers_ = min_workers
-        self.seed = random_state
+        self.random_state = random_state
 
         for k, v in kwargs.items():
             setattr(self, k, v)
-            
-        if self.seed is not None:
-            set_random_seed(self.seed, device)
             
         self.initialize();
 
@@ -235,6 +223,15 @@ class DaskBaseDamper:
         opt_kwargs = self._get_kwargs_for("optimizer")
         loss_kwargs = self._get_kwargs_for("loss")
 
+        self.random_state_ = check_random_state(self.random_state)
+        
+        limit = 2**32 - 1
+        _set_random_state(self.random_state_.randint(limit))
+        client = get_client()
+        workers = client.scheduler_info()["workers"].keys()
+        for worker in workers:
+            client.run(_set_random_state, self.random_state_.randint(limit))
+        
         self.module_ = self.module(**module_kwargs)
         self.module_.to(torch.device(self.device))
         self.optimizer_ = self.optimizer(self.module_.parameters(), **opt_kwargs)
@@ -493,7 +490,7 @@ class DaskBaseDamper:
         # for ease it's a small network that doesn't need much acceleration.
         grads = [
             client.submit(
-                gradient, model_opt, dataset, self.seed, device=device, loss=loss, idx=idx
+                gradient, model_opt, dataset, device=device, loss=loss, idx=idx
             )
             for idx in worker_idxs
         ]
