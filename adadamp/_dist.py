@@ -138,9 +138,9 @@ def gradient(
     grads: Dict[str, torch.Tensor] = {k: v.grad for k, v in model.named_parameters()}
     elapsed = time() - start
     return {
-        "_num_data": len(outputs),
+        "_num_data": n_items,
         "_time": elapsed,
-        "_loss": float(_loss.item()),
+        "_loss": loss_agg,
         **grads,
     }
 
