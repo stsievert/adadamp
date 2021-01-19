@@ -510,9 +510,17 @@ class DaskClassifier(DaskBaseDamper):
         """
         start = time()
         super().partial_fit(X, y=y, **fit_params)
+        
+        # get lr
+        lr = 0
+        for param_group in self.optimizer_.param_groups:
+            lr = param_group['lr']
+            break
+        
         stat = {
             "partial_fit__time": time() - start,
             "partial_fit__batch_size": self.batch_size_(),
+            "partial_fit__lr": lr,
             "weight_aggregate": get_model_weights(self.module_)
         }
         self._meta.update(stat)
