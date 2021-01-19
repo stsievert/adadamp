@@ -53,6 +53,7 @@ def gradient(
     loss: Callable,
     device=torch.device("cpu"),
     idx: IntArray,
+    max_bs: int=1024
 ) -> Grads:
     r"""
     Compute the model gradient for the function ``loss``.
@@ -107,21 +108,33 @@ def gradient(
     # print(id(model)) 
     
     start = time()
+    
+    # set up data
     data_target = [train_set[i] for i in idx]
     _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
     _targets = [d[1] for d in data_target]
     inputs = torch.cat(_inputs).to(device)
     targets = torch.tensor(_targets).to(device)
+    
+    # split by max bastch size    
+    Data = torch.split(inputs, max_bs)
+    Target = torch.split(targets, max_bs)
+    
+    # run through in batches tracking net result
+    loss_agg = 0
+    n_items = 0
+    for data, target in zip(Data, Target):
+        data, target = data.to(device), target.to(device)
+        outputs = model(data)
+        _loss = loss(outputs, target)
+        _loss.backward()
+        loss_agg += _loss.item()
+        n_items += len(outputs)
 
     assert model.training, "Model should be in training model"
     # assert get_model_grads(model) == 0, "Gradients not cleared before loss.backward()"
     
-    outputs = model(inputs)
-
-    _loss = loss(outputs, targets)
     
-    
-    _loss.backward()
     grads: Dict[str, torch.Tensor] = {k: v.grad for k, v in model.named_parameters()}
     elapsed = time() - start
     return {
