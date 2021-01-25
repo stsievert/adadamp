@@ -140,7 +140,7 @@ def gradient(
     return {
         "_num_data": n_items,
         "_time": elapsed,
-        "_loss": loss_agg,
+        "_loss": loss_agg / n_items,
         **grads,
     }
 
