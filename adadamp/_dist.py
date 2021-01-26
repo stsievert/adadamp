@@ -568,6 +568,10 @@ class DaskClassifierExpiriments(DaskClassifier):
         """
         Sets LR to passed value
         """
+        
+        if not hasattr(self, "initialized_") or not self.initialized_:
+            self.initialize()
+        
         for g in self.optimizer_.param_groups:
             g["lr"] = lr
 
