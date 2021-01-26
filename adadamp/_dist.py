@@ -24,14 +24,14 @@ Model = NewType("Model", torch.nn.Module)
 Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
 
 
-def get_model_weights(model):
+def _get_model_weights(model):
     s = 0
     for param in model.parameters():
         s += torch.abs(torch.sum(param)).item()
     return s
 
 
-def get_model_grads(model):
+def _get_model_grads(model):
     t = 0
     for param in model.parameters():
         if param.grad is not None:
@@ -104,7 +104,7 @@ def gradient(
     old_model, _ = model_opt
     model = deepcopy(old_model)
 
-    if get_model_grads(model) != 0:
+    if _get_model_grads(model) != 0:
         assert False, "ERROR Gradients not zero'd at grad time"
         print("NOTE: Gradients not zero'd at grad time")
 
@@ -135,7 +135,7 @@ def gradient(
         n_items += len(outputs)
 
     assert model.training, "Model should be in training model"
-    # assert get_model_grads(model) == 0, "Gradients not cleared before loss.backward()"
+    # assert _get_model_grads(model) == 0, "Gradients not cleared before loss.backward()"
 
     grads: Dict[str, torch.Tensor] = {k: v.grad for k, v in model.named_parameters()}
     elapsed = time() - start
@@ -155,7 +155,7 @@ def _update_model(
     num_data = sum(info["_num_data"] for info in grads)
 
     # get initial weights
-    opt_weights = get_model_weights(model)
+    opt_weights = _get_model_weights(model)
 
     # aggregate and update the gradients
     for name, param in model.named_parameters():
@@ -166,10 +166,10 @@ def _update_model(
     optimizer.step()
     optimizer.zero_grad()
 
-    assert get_model_grads(model) == 0, "opt.zero_grad() not clearing gradients"
+    assert _get_model_grads(model) == 0, "opt.zero_grad() not clearing gradients"
 
     # check update applied
-    assert opt_weights != get_model_weights(
+    assert opt_weights != _get_model_weights(
         model
     ), "ERROR: _update_model did not change model weights"
 
@@ -315,15 +315,15 @@ class DaskBaseDamper:
         )
 
         m_init, _ = model_opt.result()
-        m_init_weight = get_model_weights(m_init)
+        m_init_weight = _get_model_weights(m_init)
         model_opt = client.submit(_update_model, model_opt, grads)
         m, o = model_opt.result()
 
-        assert m_init_weight != get_model_weights(
+        assert m_init_weight != _get_model_weights(
             m
         ), "ERROR: Update model does not change model weights"
         assert (
-            get_model_grads(m) == 0
+            _get_model_grads(m) == 0
         ), "ERROR: Gradients not cleared after model update"
 
         return model_opt, bs
@@ -382,7 +382,7 @@ class DaskBaseDamper:
         o.load_state_dict(self.optimizer_.state_dict())
         o.zero_grad()
 
-        assert get_model_grads(m) == 0, "ERROR: Gradients not zero'd at copy time"
+        assert _get_model_grads(m) == 0, "ERROR: Gradients not zero'd at copy time"
 
         # Send the model/optimizer to workers
         m = client.scatter(m)
@@ -414,13 +414,13 @@ class DaskBaseDamper:
             # check for weight update
             model, opt = model_opt.result()
 
-            new_weights = get_model_weights(model)
+            new_weights = _get_model_weights(model)
             weights_changed = new_weights != prev_weights
             prev_weights = new_weights
 
             # check grads
             assert (
-                get_model_grads(model) == 0
+                _get_model_grads(model) == 0
             ), "ERROR: gradients not zeroed after train step"
 
             # exit condition
@@ -433,7 +433,7 @@ class DaskBaseDamper:
 
         # check weights updated and update model
         new_model, opt = model_opt.result()
-        assert get_model_weights(self.module_) != get_model_weights(
+        assert _get_model_weights(self.module_) != _get_model_weights(
             new_model
         ), "ERROR: Model weights not changed after train step"
 
@@ -542,7 +542,7 @@ class DaskClassifier(DaskBaseDamper):
             "partial_fit__time": time() - start,
             "partial_fit__batch_size": self.batch_size_(),
             "partial_fit__lr": lr,
-            "weight_aggregate": get_model_weights(self.module_),
+            "weight_aggregate": _get_model_weights(self.module_),
         }
         self._meta.update(stat)
         self._meta["partial_fit__calls"] += 1
