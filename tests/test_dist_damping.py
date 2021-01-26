@@ -1,17 +1,20 @@
 from __future__ import print_function
+
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import sys
-import os
-from pathlib import Path
-from sklearn.utils import check_random_state
+import torch.nn.functional as F
 import torch.optim as optim
 from distributed import Client
-import numpy as np
-import torch.nn.functional as F
+from distributed.utils_test import gen_cluster
+from sklearn.utils import check_random_state
 
-from adadamp import DaskClassifier, DaskBaseDamper
+from test_sklearn_interface import Net, X, y
+from adadamp import DaskBaseDamper, DaskClassifier
 
 
 class LinearNet(nn.Module):
@@ -33,10 +36,9 @@ def _random_dataset(n, d, random_state=None):
 
 def _prep():
     from distributed.protocol import torch
-def test_main():
-    #  client = Client("localhost:8786")
-    client = Client()
-    client.run(_prep)
+
+
+def test_dask_damper_updates():
     batch_size = 128
     n_updates = 5
 
@@ -71,5 +73,8 @@ def test_main():
         est2.partial_fit(X[idx], y[idx])
     assert est2.meta_["n_weight_changes"] == n_updates
 
+
 if __name__ == "__main__":
-    test_main()
+    client = Client()
+    client.run(_prep)
+    test_dask_damper_updates()

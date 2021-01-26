@@ -128,7 +128,7 @@ def gradient(
         model = model.train()
 
     # run through in batches tracking net result
-    loss_agg = 0
+    loss_agg = 0.0
     n_items = 0
     for data, target in zip(Data, Target):
         data, target = data.to(device), target.to(device)
@@ -220,8 +220,6 @@ class DaskBaseDamper:
 
         for k, v in kwargs.items():
             setattr(self, k, v)
-
-        self.initialize()
 
     def _get_param_names(self):
         return [k for k in self.__dict__ if k[0] != "_" and k[-1] != "_"]
@@ -408,7 +406,6 @@ class DaskBaseDamper:
         self.module_ = m
         self.optimizer_ = o
         weights = client.gather(_weights)
-        print(weights)
         self._meta["n_weight_changes"] += len(np.unique(weights))
         return True
 
