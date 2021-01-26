@@ -1,6 +1,7 @@
 from copy import copy, deepcopy
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Union, Tuple, NewType
+from warnings import warn
 
 import dask
 import numpy as np
@@ -25,19 +26,19 @@ Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
 
 
 def _get_model_weights(model):
-    s = 0
-    for param in model.parameters():
-        s += torch.abs(torch.sum(param)).item()
-    return s
+    return sum(torch.abs(torch.sum(param)).item() for param in model.parameters())
 
 
 def _get_model_grads(model):
-    t = 0
-    for param in model.parameters():
-        if param.grad is not None:
-            s = torch.abs(torch.sum(param.grad)).item()
-            t += s
-    return t
+    return sum(
+        torch.abs(torch.sum(param.grad)).item()
+        for param in model.parameters()
+        if param.grad is not None
+    )
+
+
+def _weight_sum(model_opt):
+    return _get_model_weights(model_opt[0])
 
 
 def _set_random_state(seed: int, device="cuda") -> bool:
@@ -98,17 +99,12 @@ def gradient(
     where `l` is the loss function for a single example.
 
     """
-
     # Workaround: Gradients should be cleared when entering this funciton,
     #     but at this moment this behavior is not occuring
-    old_model, _ = model_opt
-    model = deepcopy(old_model)
+    model = deepcopy(model_opt[0])
 
     if _get_model_grads(model) != 0:
-        assert False, "ERROR Gradients not zero'd at grad time"
-        print("NOTE: Gradients not zero'd at grad time")
-
-    # print(id(model))
+        warn("ERROR Gradients not zero'd at grad time")
 
     start = time()
 
@@ -123,6 +119,14 @@ def gradient(
     Data = torch.split(inputs, max_bs)
     Target = torch.split(targets, max_bs)
 
+    # Zero gradients
+    for p in model.parameters():
+        if p.grad is not None:
+            p.grad *= 0.0
+
+    if not model.training:
+        model = model.train()
+
     # run through in batches tracking net result
     loss_agg = 0
     n_items = 0
@@ -131,18 +135,15 @@ def gradient(
         outputs = model(data)
         _loss = loss(outputs, target)
         _loss.backward()
-        loss_agg += _loss.item()
+        loss_agg += float(_loss.item())
         n_items += len(outputs)
-
-    assert model.training, "Model should be in training model"
-    # assert _get_model_grads(model) == 0, "Gradients not cleared before loss.backward()"
 
     grads: Dict[str, torch.Tensor] = {k: v.grad for k, v in model.named_parameters()}
     elapsed = time() - start
     return {
         "_num_data": n_items,
         "_time": elapsed,
-        "_loss": loss_agg / n_items,
+        "_loss": loss_agg,
         **grads,
     }
 
@@ -154,24 +155,30 @@ def _update_model(
     model, optimizer = model_opt
     num_data = sum(info["_num_data"] for info in grads)
 
-    # get initial weights
-    opt_weights = _get_model_weights(model)
+    old_weights = _get_model_weights(model)
 
     # aggregate and update the gradients
     for name, param in model.named_parameters():
         grad = sum(g[name] for g in grads)  # sums together all grads for this layer
         param.grad = grad / num_data
 
+    # Make sure the model and optimizer are connected
+    optimizer.param_groups = []
+    optimizer.add_param_group({"params": list(model.parameters())})
+
     # update model
     optimizer.step()
     optimizer.zero_grad()
 
-    assert _get_model_grads(model) == 0, "opt.zero_grad() not clearing gradients"
+    new_weights = _get_model_weights(model)
 
-    # check update applied
-    assert opt_weights != _get_model_weights(
-        model
-    ), "ERROR: _update_model did not change model weights"
+    if np.allclose(old_weights, new_weights):
+        diff = new_weights - old_weights
+        warn("Model appears not to update with weight difference {diff}")
+
+    if _get_model_grads(model) >= 1e-6:
+        s = _get_model_grads(model)
+        warn(f"opt.zero_grad() not clearing gradients, {s}")
 
     return model, optimizer
 
@@ -314,17 +321,7 @@ class DaskBaseDamper:
             device=device,
         )
 
-        m_init, _ = model_opt.result()
-        m_init_weight = _get_model_weights(m_init)
         model_opt = client.submit(_update_model, model_opt, grads)
-        m, o = model_opt.result()
-
-        assert m_init_weight != _get_model_weights(
-            m
-        ), "ERROR: Update model does not change model weights"
-        assert (
-            _get_model_grads(m) == 0
-        ), "ERROR: Gradients not cleared after model update"
 
         return model_opt, bs
 
@@ -370,23 +367,11 @@ class DaskBaseDamper:
         dataset = self._get_dataset(X, y=y)
         client = get_client()
 
-        # copy model
-        module_kwargs = self._get_kwargs_for("module")
-        m = self.module(**module_kwargs)
-        m.to(torch.device(self.device))
-        m.load_state_dict(self.module_.train().state_dict())
-
-        # copy optimizer
-        opt_kwargs = self._get_kwargs_for("optimizer")
-        o = self.optimizer(m.parameters(), **opt_kwargs)
-        o.load_state_dict(self.optimizer_.state_dict())
-        o.zero_grad()
-
-        assert _get_model_grads(m) == 0, "ERROR: Gradients not zero'd at copy time"
+        self.module_.to(self.device)
 
         # Send the model/optimizer to workers
-        m = client.scatter(m)
-        o = client.scatter(o)
+        m = client.scatter(self.module_)
+        o = client.scatter(self.optimizer_)
         model_opt = client.submit(lambda x, y: (x, y), m, o)
 
         # Give all data to each worker
@@ -399,7 +384,7 @@ class DaskBaseDamper:
         device = torch.device(self.device)
 
         # Run BS items through until hitting every element in dataset
-        prev_weights = 0
+        _weights = []
         while True:
             model_opt, bs = self.train_step(
                 model_opt,
@@ -410,36 +395,21 @@ class DaskBaseDamper:
                 device=device,
                 **fit_params,
             )
-
-            # check for weight update
-            model, opt = model_opt.result()
-
-            new_weights = _get_model_weights(model)
-            weights_changed = new_weights != prev_weights
-            prev_weights = new_weights
-
-            # check grads
-            assert (
-                _get_model_grads(model) == 0
-            ), "ERROR: gradients not zeroed after train step"
+            weight = client.submit(_weight_sum, model_opt)
+            _weights.append(weight)
 
             # exit condition
             self._meta["n_updates"] += 1
             self._meta["n_data"] += bs
-            if weights_changed:
-                self._meta["n_weight_changes"] += 1
             if self._meta["n_data"] - start_data >= len(X):
                 break
 
-        # check weights updated and update model
-        new_model, opt = model_opt.result()
-        assert _get_model_weights(self.module_) != _get_model_weights(
-            new_model
-        ), "ERROR: Model weights not changed after train step"
-
-        self.module_ = new_model
-        self.optimizer_ = opt
-
+        m, o = model_opt.result()
+        self.module_ = m
+        self.optimizer_ = o
+        weights = client.gather(_weights)
+        print(weights)
+        self._meta["n_weight_changes"] += len(np.unique(weights))
         return True
 
     def score(self, X, y):

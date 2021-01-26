@@ -5,64 +5,71 @@ import torch.optim as optim
 import sys
 import os
 from pathlib import Path
-from notebooks import model
-from sklearn.datasets import make_classification
+from sklearn.utils import check_random_state
+import torch.optim as optim
+from distributed import Client
+import numpy as np
+import torch.nn.functional as F
 
-DIR = Path(".").absolute()
-sys.path.append(str(DIR))
-os.chdir(str(DIR.parent)) # make notebook assume its in parent dir
+from adadamp import DaskClassifier, DaskBaseDamper
 
-def get_model_weights(model):
-    s = 0
-    for param in model.parameters():
-        s += torch.abs(torch.sum(param)).item()
-    return s
 
-def get_dataset():
-    # Expected 4-dimensional input for 4-dimensional weight [32, 1, 3, 3], but got 2-dimensional input of size [32, 20] instead
-    X, y = make_classification(n_samples=batch_size * n_updates, n_features=784)
-    # match MNIST X
-    X.resize((640, 28, 28))
-    X = torch.from_numpy(X)
-    X = X.unsqueeze(1)
-    X = X.float()
-    X.to(device)
-    # match MNIST y
-    y = torch.from_numpy(y)
-    y.to(device)
-    
+class LinearNet(nn.Module):
+    def __init__(self, d=10, out=1):
+        super().__init__()
+        self.d = d
+        self.linear = nn.Linear(d, out)
+
+    def forward(self, x):
+        return self.linear(x).reshape(-1)
+
+
+def _random_dataset(n, d, random_state=None):
+    rng = check_random_state(random_state)
+    X = rng.uniform(size=(n, d)).astype("float32")
+    y = rng.uniform(size=n).astype("float32")
     return X, y
-    
-    
-if __name__ == "__main__":
-    
+
+
+def _prep():
+    from distributed.protocol import torch
+def test_main():
+    #  client = Client("localhost:8786")
+    client = Client()
+    client.run(_prep)
     batch_size = 128
     n_updates = 5
-    device_str = "cpu" if not torch.cuda.is_available() else "cuda:0"
-    device = torch.device(device_str)
+
+    n = n_updates * batch_size
+    d = 10
+
+    X, y = _random_dataset(n, d)
+    y = y.reshape(-1, 1)
+
+    device = "cpu" if not torch.cuda.is_available() else "cuda:0"
     kwargs = {
-        'batch_size': batch_size, 
-        'max_epochs': 1, 
-        'random_state': 42,
-        'module': Net,
-        'weight_decay': 1e-5,
-        'loss': nn.CrossEntropyLoss,
-        'optimizer': optim.Adagrad,
-        'device': device_str
+        "batch_size": batch_size,
+        "max_epochs": 1,
+        "random_state": 42,
+        "module": LinearNet,
+        "module__d": d,
+        "weight_decay": 1e-5,
+        "loss": nn.MSELoss,
+        "optimizer": optim.SGD,
+        "optimizer__lr": 0.1,
+        "device": device,
     }
-    
-    X, y = get_dataset()
 
-    # call fit with whole dataset
-    est1 = DaskClassifier(**kwargs)
-    est1.fit(X, y)
-    print(get_model_weights(est1.module_))
+    est1 = DaskBaseDamper(**kwargs)
+    est1.partial_fit(X, y)
+    assert est1.meta_["n_weight_changes"] == est1.meta_["n_updates"] == n_updates
 
-    # run partial fit many times
-    est2 = DaskClassifier(**kwargs)
+    # run partial fit many times. Each partial fit does one update
+    est2 = DaskBaseDamper(**kwargs)
     for k in range(n_updates):
         idx = np.arange(batch_size * k, batch_size * (k + 1)).astype(int)
         est2.partial_fit(X[idx], y[idx])
-    print(get_model_weights(est2.module_))
+    assert est2.meta_["n_weight_changes"] == n_updates
 
-    assert np.allclose(get_model_weights(est1.module_), get_model_weights(est2.module_))
+if __name__ == "__main__":
+    test_main()
