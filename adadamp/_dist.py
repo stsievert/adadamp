@@ -469,7 +469,8 @@ class DaskBaseDamper:
         # Iterate through the dataset in batches
         # TODO: integrate with IterableDataset (this is pretty much already
         # an IterableDataset but without vectorization)
-        idx = [i % len_dataset for i in range(start_idx, start_idx + batch_size)]
+        idx = self.random_state_.choice(len_dataset, size=batch_size, replace=False)
+        idx.sort()
         worker_idxs = np.array_split(idx, n_workers)
 
         # Distribute the computation of the gradient. In practice this will
