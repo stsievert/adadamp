@@ -163,8 +163,16 @@ def _update_model(
         param.grad = grad / num_data
 
     # Make sure the model and optimizer are connected
+    init_lr = None
+    for g in optimizer.param_groups:
+        init_lr = float(g['lr'])
+
     optimizer.param_groups = []
     optimizer.add_param_group({"params": list(model.parameters())})
+    
+    # Re-set learning rate from initial optimizer
+    for g in optimizer.param_groups:
+        g['lr'] = init_lr
 
     # update model
     optimizer.step()
@@ -305,7 +313,7 @@ class DaskBaseDamper:
             self.cluster.scale(self.n_workers_)
 
         self._meta.update({"n_workers": self.n_workers_})
-
+        
         # compute grads
         grads = self._get_gradients(
             epoch_n_data,
@@ -369,6 +377,7 @@ class DaskBaseDamper:
 
         # Send the model/optimizer to workers
         m = client.scatter(self.module_)
+        
         o = client.scatter(self.optimizer_)
         model_opt = client.submit(lambda x, y: (x, y), m, o)
 
@@ -469,7 +478,7 @@ class DaskBaseDamper:
         # Iterate through the dataset in batches
         # TODO: integrate with IterableDataset (this is pretty much already
         # an IterableDataset but without vectorization)
-        idx = self.random_state_.choice(len_dataset, size=batch_size, replace=False)
+        idx = self.random_state_.choice(len_dataset, size=min(batch_size, len_dataset), replace=False)
         idx.sort()
         worker_idxs = np.array_split(idx, n_workers)
 
@@ -572,7 +581,7 @@ class DaskClassifierExpiriments(DaskClassifier):
         
         if not hasattr(self, "initialized_") or not self.initialized_:
             self.initialize()
-        
+
         for g in self.optimizer_.param_groups:
             g["lr"] = lr
 
