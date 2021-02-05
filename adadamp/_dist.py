@@ -590,3 +590,119 @@ class DaskClassifierExpiriments(DaskClassifier):
         Updates batch size
         """
         self.batch_size = bs
+    
+        
+class DaskClassifierSimulator(DaskClassifierExpiriments):
+    
+    def set_sim(self, dic):
+        """
+        Sets simulation data for next epoch
+        """
+        self._sim_data = dic
+        
+    def initialize(self):
+        self._sim_data = None
+        super().initialize()
+        
+    def _get_gradients(
+        self,
+        start_idx,
+        model_opt,
+        dataset,
+        *,
+        loss,
+        batch_size,
+        client,
+        n_workers,
+        len_dataset,
+        device,
+    ):
+        """
+        Calculates the gradients at a given state. This function is
+        mainly in charge of sending the gradient calculation off to the
+        dask workers, the hard work is done in _dist.gradient()
+
+        Note:
+        - In this implementation, each worker manually grabs the data
+          and caches it themselves. This is a work around for a dask bug
+        - See the doc string of _get_fashionminst in _dist.py for more info
+
+        Parameters
+        ----------
+        start_idx : int
+            Index to start sampling at. Data indices from ``start_idx`` to
+            ``start_idx + batch_size`` will be sampled.
+
+        model_future : distributed.future (?)
+            Future object of the model to get gradients for
+
+        n : int
+            number of items in training set
+
+        idx: int
+            Current epoch, used to set up random state
+
+        batch_size: int
+            Current batch size
+
+        n_workers: int
+            Number of workers current running
+
+        """
+        # Iterate through the dataset in batches
+        # TODO: integrate with IterableDataset (this is pretty much already
+        # an IterableDataset but without vectorization)
+        idx = self.random_state_.choice(len_dataset, size=min(batch_size, len_dataset), replace=False)
+        idx.sort()
+        worker_idxs = np.array_split(idx, n_workers)
+
+        # Distribute the computation of the gradient. In practice this will
+        # mean (say) 4 GPUs to accelerate the gradient computation. Right now
+        # for ease it's a small network that doesn't need much acceleration.
+        total_time = self._sim_data["partial_fit__time"]
+        grads_per_worker = self._sim_data["grads_per_worker"]
+        batch_size = self._sim_data["partial_fit__batch_size"]
+        time = total_time / (batch_size/grads_per_worker)
+        
+        grads = [
+            client.submit(
+                sim_gradient, time, model_opt, dataset, device=device, idx=idx
+            )
+            for idx in worker_idxs
+        ]
+        
+        # what should the size of grads be?
+        return None
+    
+    def score(self, X, y=None):
+        score_time = self._sim_data["partial_fit__time"]
+        time.sleep(score_time)
+        return 0.123456789
+
+
+
+def sim_gradient(
+    timing,
+    model_opt: Tuple[Model, Optimizer],
+    train_set,
+    *,
+    device=torch.device("cpu"),
+    idx: IntArray,
+    max_bs: int = 1024,
+) -> Grads:
+    
+    # Workaround: Gradients should be cleared when entering this funciton,
+    #     but at this moment this behavior is not occuring
+    model = deepcopy(model_opt[0])
+
+    # still wanna load data normally for accurate data
+    data_target = [train_set[i] for i in idx]
+    _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
+    _targets = [d[1] for d in data_target]
+    inputs = torch.cat(_inputs).to(device)
+    targets = torch.tensor(_targets).to(device)
+    
+    time.sleep(timing)
+    
+    return None # what size should this be?
+    

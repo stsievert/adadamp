@@ -10,7 +10,7 @@ from .damping import (
     GradientDescent,
     ConvergenceError,
 )
-from ._dist import DaskBaseDamper, DaskClassifier, DaskClassifierExpiriments
+from ._dist import DaskBaseDamper, DaskClassifier, DaskClassifierExpiriments, DaskClassifierSimulator
 from .utils import _get_resnet18
 
 __all__ = [
@@ -20,5 +20,5 @@ __all__ = [
     "GeoDamp",
     "GeoDampLR",
     "CntsDampLR",
-    "GradientDescent",
+    "GradientDescent"
 ]
