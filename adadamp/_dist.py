@@ -349,19 +349,22 @@ class DaskBaseDamper:
         return model_opt, bs
 
     def _get_dataset(self, X, y=None) -> TensorDataset:
-        if isinstance(X, Dataset):
+        if isinstance(X, TensorDataset):
+            return X
+        elif isinstance(X, Dataset):
             return self.preprocess(X)
-        if isinstance(X, list):
-            X = np.ndarray(X)
-        if isinstance(X, np.ndarray):
-            X = torch.from_numpy(X)
-        if isinstance(y, list) and len(y):
-            y = np.ndarray(y)
-        if isinstance(y, np.ndarray):
-            y = torch.from_numpy(y)
+        else:
+            if isinstance(X, list):
+                X = np.ndarray(X)
+            if isinstance(X, np.ndarray):
+                X = torch.from_numpy(X)
+            if isinstance(y, list) and len(y):
+                y = np.ndarray(y)
+            if isinstance(y, np.ndarray):
+                y = torch.from_numpy(y)
 
-        args = (X, y) if y is not None else (X,)
-        return TensorDataset(*args)
+            args = (X, y) if y is not None else (X,)
+            return TensorDataset(*args)
 
     def fit(self, X, y=None, **fit_params):
         for epoch in range(self.max_epochs):
