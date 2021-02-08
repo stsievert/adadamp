@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Union, Tuple, NewType
 from warnings import warn
 
 import dask
+import dask.array as da
 import numpy as np
 import torch
 import torch.nn as nn
@@ -17,7 +18,7 @@ from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
 
 from torch.autograd import Variable
-from torch.utils.data import Dataset, IterableDataset, TensorDataset
+from torch.utils.data import Dataset, IterableDataset, TensorDataset, DataLoader
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
 Number = Union[int, float, np.integer, np.float]
@@ -109,15 +110,11 @@ def gradient(
     start = time()
 
     # set up data
-    data_target = [train_set[i] for i in idx]
-    _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
-    _targets = [d[1] for d in data_target]
-    inputs = torch.cat(_inputs).to(device)
-    targets = torch.tensor(_targets).to(device)
+    _data, _target = train_set[idx]
 
     # split by max bastch size
-    Data = torch.split(inputs, max_bs)
-    Target = torch.split(targets, max_bs)
+    Data = torch.split(_data, max_bs)
+    Target = torch.split(_target, max_bs)
 
     # Zero gradients
     for p in model.parameters():
@@ -229,6 +226,19 @@ class DaskBaseDamper:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
+    @staticmethod
+    def preprocess(ds: Dataset) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Preprocess the dataset
+        """
+        loader = DataLoader(ds, shuffle=False)
+        data_target = [(data, target) for data, target in loader]
+        _inputs = [d for d, t in data_target]
+        _targets = [t for d, t in data_target]
+        inputs = torch.cat(_inputs)
+        targets = torch.cat(_targets)
+        return inputs, targets
+
     def _get_param_names(self):
         return [k for k in self.__dict__ if k[0] != "_" and k[-1] != "_"]
 
@@ -333,7 +343,7 @@ class DaskBaseDamper:
 
     def _get_dataset(self, X, y=None) -> Dataset:
         if isinstance(X, Dataset):
-            return X
+            X, y = self.preprocess(X)
         if isinstance(X, list):
             X = np.ndarray(X)
         if isinstance(X, np.ndarray):
@@ -343,8 +353,7 @@ class DaskBaseDamper:
         if isinstance(y, np.ndarray):
             y = torch.from_numpy(y)
 
-        device = torch.device(self.device)
-        args = (X.to(device), y.to(device)) if y is not None else (X.to(device),)
+        args = (X, y) if y is not None else (X,)
         return TensorDataset(*args)
 
     def fit(self, X, y=None, **fit_params):
