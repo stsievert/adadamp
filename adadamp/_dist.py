@@ -227,17 +227,24 @@ class DaskBaseDamper:
             setattr(self, k, v)
 
     @staticmethod
-    def preprocess(ds: Dataset) -> Tuple[torch.Tensor, torch.Tensor]:
+    def preprocess(ds: Dataset) -> TensorDataset:
         """
-        Preprocess the dataset
+        Turn a PyTorch dataset into Torch Tensors.
+
+        This will require a moderate amount of memory. For the MNIST dataset
+        with 60,000 32x32 RGB images, this will consume 234 megabytes of
+        memory. These data are not stored on the training devices (/GPUs), essentially
+        only the transformations are preformed.
+
         """
-        loader = DataLoader(ds, shuffle=False)
-        data_target = [(data, target) for data, target in loader]
-        _inputs = [d for d, t in data_target]
-        _targets = [t for d, t in data_target]
-        inputs = torch.cat(_inputs)
-        targets = torch.cat(_targets)
-        return inputs, targets
+        loader = DataLoader(ds, shuffle=False, batch_size=1000)
+        data_target = [d for d in loader]
+        n_tensors = len(data_target[0])
+        tensors = []
+        for i in range(n_tensors):
+            tensor = [d[i] for d in data_target]
+            tensors.append(torch.cat(tensor))
+        return TensorDataset(*tensors)
 
     def _get_param_names(self):
         return [k for k in self.__dict__ if k[0] != "_" and k[-1] != "_"]
@@ -341,9 +348,9 @@ class DaskBaseDamper:
 
         return model_opt, bs
 
-    def _get_dataset(self, X, y=None) -> Dataset:
+    def _get_dataset(self, X, y=None) -> TensorDataset:
         if isinstance(X, Dataset):
-            X, y = self.preprocess(X)
+            return self.preprocess(X)
         if isinstance(X, list):
             X = np.ndarray(X)
         if isinstance(X, np.ndarray):

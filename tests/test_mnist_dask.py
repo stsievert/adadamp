@@ -50,8 +50,8 @@ def test_mnist_w_dask(preprocess=False):
     if not preprocess:
         _ = net.fit(trimmed)
     else:
-        X, y = net.preprocess(trimmed)
-        _ = net.fit(X, y)
+        ds2 = net.preprocess(trimmed)
+        _ = net.fit(ds2)
     assert net.meta_["n_updates"] == 4
 
 
