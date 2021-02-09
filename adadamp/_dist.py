@@ -110,6 +110,7 @@ def gradient(
     start = time()
 
     # set up data
+    idx.sort()
     _data, _target = train_set[idx]
 
     # split by max bastch size
@@ -231,10 +232,13 @@ class DaskBaseDamper:
         """
         Turn a PyTorch dataset into Torch Tensors.
 
-        This will require a moderate amount of memory. For the MNIST dataset
-        with 60,000 32x32 RGB images, this will consume 234 megabytes of
-        memory. These data are not stored on the training devices (/GPUs), essentially
-        only the transformations are preformed.
+        This will require a moderate amount of memory. For image datasets where
+        each pixel is transformed from uint8 to float32, this will require a
+        factor of 4 more memory. For the popular MNIST and CIFAR datasets, this
+        means 37MB → 150MB and 175MB → 703MB respectively.
+
+        These data are not stored on the training devices (/GPUs), so
+        essentially only the transformations are preformed.
 
         """
         loader = DataLoader(ds, shuffle=False, batch_size=1000)
