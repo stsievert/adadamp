@@ -12,15 +12,18 @@ from torch.optim import Optimizer
 from time import time
 from distributed import get_client
 from sklearn.base import BaseEstimator
+from sklearn.exceptions import NotFittedError
 from sklearn.utils import check_random_state
 from skorch import NeuralNet
 from torch.autograd import Variable
 from torch.utils.data import Dataset, IterableDataset, TensorDataset
+from torch.nn.modules.loss import _Loss as Loss
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
 Number = Union[int, float, np.integer, np.float]
 Model = NewType("Model", torch.nn.Module)
 Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
+ArrayLike = Union[np.ndarray, torch.Tensor, List[Number]]
 
 
 def gradient(
@@ -119,34 +122,71 @@ def _update_model(
 
 
 class DaskBaseDamper:
+    """
+    Train a PyTorch model with Dask.
+
+    This class has a Scikit-learn API. It accepts PyTorch datasets and
+    array-like objects (PyTorch Tensors or NumPy arrays).
+
+    Parameters
+    ----------
+    module : torch.nn.Module
+    loss : PyTorch Loss
+    optimizer : torch.optim.Optimizer
+    batch_size : int
+        The batch size to use.
+    min_workers : int
+        The minimum number of workers available
+    max_workers : int
+        The maximum number of workers available
+    device : str
+        The device used. Directly passed to :class:`torch.device`.
+    grads_per_worker: int
+        How many gradients should each worker handle?
+    max_epochs : int
+        The maximum number of passes through the dataset (or epochs) to train
+        for.
+    **kwargs : Dict[str, Any]
+        Keyword arguments to pass to Skorch. For example, these can include
+        ``optimizer__lr`` to set the learning rate or ``module__foo`` to pass
+        keyword argument ``foo`` to module initialization.
+
+    Attributes
+    ----------
+    module_ : nn.Module
+        The initialize PyTorch module.
+    optimizer_ : Optimizer
+        The initialize PyTorch optimizer.
+    loss_ : Loss
+        The initialized PyTorch loss.
+    initialized_ : bool
+        Whether this class has been initialized.
+    meta_ : Dict[str, Number]
+        Meta information about the fitting process. This includes keys
+        ``['n_updates', 'n_data', 'score__calls', 'partial_fit__calls']``.
+    """
     def __init__(
         self,
-        module,
-        loss,
-        optimizer,
+        module: nn.Module,
+        loss: Loss,
+        optimizer: Optimizer,
         *,
-        metrics=None,
-        batch_size=32,
-        cluster=None,
-        max_batch_size=1024,
-        min_workers=1,
-        max_workers=8,
+        batch_size: int=32,
+        min_workers: int=1,
+        max_workers: int=8,
         device: str = "cpu",
-        grads_per_worker=32,
-        max_epochs=20,
+        grads_per_worker: int=128,
+        max_epochs: int=20,
         **kwargs,
     ):
         self.module = module
         self.loss = loss
         self.optimizer = optimizer
-        self.metrics = metrics
         self.device = device
-        self.cluster = cluster
         self.grads_per_worker = grads_per_worker
         self.max_epochs = max_epochs
 
         self.batch_size = batch_size
-        self.max_batch_size = max_batch_size
         self.min_workers = min_workers
         self.max_workers = max_workers
         for k, v in kwargs.items():
@@ -172,7 +212,8 @@ class DaskBaseDamper:
             if name in k[: len(name) + 4]
         }
 
-    def initialize(self, *args, **kwargs):
+    def _initialize(self, *args, **kwargs):
+        """Initialize the model/optimizer/etc"""
         module_kwargs = self._get_kwargs_for("module")
         opt_kwargs = self._get_kwargs_for("optimizer")
         loss_kwargs = self._get_kwargs_for("loss")
@@ -186,12 +227,14 @@ class DaskBaseDamper:
             "score__calls": 0,
             "partial_fit__calls": 0,
         }
-        self.initialized_ = True
+        self._initialized = True
 
     def batch_size_(self):
+        """The batch size, which is strongly related the noise in the
+        gradient estimate. """
         return self.batch_size
 
-    def train_step(
+    def _train_step(
         self,
         model_opt,
         dataset,
@@ -203,14 +246,14 @@ class DaskBaseDamper:
         **fit_params,
     ):
         """
-        Calculate gradients and take one optimization step.
+        Calculate gradients and take one optimization step with Dask.
 
         Parameters
         ----------
         X, y : torch.Tensors
             Input to model
         fit_params : dict
-            Extra arguments passed to module_.forward.
+            Extra arguments passed to ``self.module_.forward``.
 
         Returns
         -------
@@ -219,8 +262,9 @@ class DaskBaseDamper:
         """
         bs = self.batch_size_()
         self.n_workers_ = bs // self.grads_per_worker
-        if self.cluster:
-            self.cluster.scale(self.n_workers_)
+        if client.cluster:
+            n_workers = np.clip(self.n_workers_, self.min_workers, self.max_workers)
+            client.cluster.scale(int(n_workers))
 
         # compute grads
         grads = self._get_gradients(
@@ -251,19 +295,46 @@ class DaskBaseDamper:
         args = (X, y) if y is not None else (X,)
         return TensorDataset(*args)
 
-    def fit(self, X, y=None, **fit_params):
+    def fit(self, X: Union[ArrayLike, Dataset], y: ArrayLike=None, **fit_params):
+        """
+        Fit the model.
+
+        Parameters
+        ----------
+        X : ArrayLike or Dataset
+            Features if array-like, otherwise a torch dataset
+        y : ArrayLike
+        """
+        self._initialize()
         for epoch in range(self.max_epochs):
             self.partial_fit(X, y=y, **fit_params)
         return self
 
     def partial_fit(self, X, y=None, **fit_params):
-        if not hasattr(self, "initialized_") or not self.initialized_:
-            self.initialize()
+        """
+        Runs 1 epoch on the given data and model
 
-        self.run_single_epoch(X, y=y, **fit_params)
+        Parameters
+        ----------
+        X : ArrayLike or Dataset
+            Features if array-like, otherwise a torch dataset
+        y : ArrayLike
+        """
+        start = time()
+        if not self.initialized_:
+            self._initialize()
+
+        self._run_single_epoch(X, y=y, **fit_params)
+
+        stat = {
+            "partial_fit__time": time() - start,
+            "partial_fit__batch_size": self.batch_size_(),
+        }
+        self._meta.update(stat)
+        self._meta["partial_fit__calls"] += 1
         return self
 
-    def run_single_epoch(self, X, y=None, **fit_params):
+    def _run_single_epoch(self, X, y=None, **fit_params):
         """
         Train a single epoch.
 
@@ -272,7 +343,7 @@ class DaskBaseDamper:
         y : np.ndarray, torch.Tensor, optional.
             Outputs to match.
         fit_params : dict
-            Arguments to pass to self.module_.forward
+            Arguments to pass to ``self.module_.forward``.
         """
         dataset = self._get_dataset(X, y=y)
         client = get_client()
@@ -291,7 +362,7 @@ class DaskBaseDamper:
         start_data = copy(self._meta["n_data"])
         loss = deepcopy(self.loss_)
         while True:
-            model_opt, bs = self.train_step(
+            model_opt, bs = self._train_step(
                 model_opt,
                 dataset,
                 loss=loss,
@@ -382,28 +453,42 @@ class DaskBaseDamper:
     def meta_(self):
         return deepcopy(self._meta)
 
+    @property
+    def initialized_(self):
+        return hasattr(self, "_initialized") and self._initialized
+
     def _get_tags(self):
         return BaseEstimator()._get_tags()
 
 
 class DaskClassifier(DaskBaseDamper):
-    def partial_fit(self, data, target=None):
-        """
-        Runs 1 epoch on the given data and model
-        """
-        start = time()
-        super().partial_fit(data, target=target)
-        stat = {
-            "partial_fit__time": time() - start,
-            "partial_fit__batch_size": self.batch_size_(),
-        }
-        self._meta.update(stat)
-        self._meta["partial_fit__calls"] += 1
-        return self
-
     def score(self, X, y=None):
+        """
+        Score the current model on the data passed.
+
+        Parameters
+        ----------
+        X : ArrayLike or Dataset
+            Features if array-like, or a PyTorch Dataset.
+        y : ArrayLike
+            Targets if ``X`` is array-like.
+
+        Raises
+        ------
+        NotFittedError
+            If the estimator has not been fit yet
+        ValueError
+            If an empty array/dataset is passed.
+
+        Notes
+        -----
+        The loss, time and accuracy are recorded in ``self.meta_``.
+        """
         if not hasattr(self, "initialized_") or not self.initialized_:
-            self.initialize()
+            raise NotFittedError(
+                "This instance is not fitted yet. Call 'fit' with the "
+                "appropriate arguments before using this estimator"
+             )
 
         if len(X) == 0:
             raise ValueError("Pass some data to `score`")
