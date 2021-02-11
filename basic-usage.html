@@ -1,23 +1,32 @@
 
 
 <!DOCTYPE html>
-<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
-<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<html class="writer-html5" lang="en" >
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
   
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   
   <title>Basic Usage &mdash; adadamp  documentation</title>
   
 
   
-  
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+
   
   
 
   
-  <script type="text/javascript" src="_static/js/modernizr.min.js"></script>
+  
+
+  
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
   
     
       <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
@@ -25,16 +34,11 @@
         <script src="_static/underscore.js"></script>
         <script src="_static/doctools.js"></script>
         <script src="_static/language_data.js"></script>
-        <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+        <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
     
     <script type="text/javascript" src="_static/js/theme.js"></script>
 
     
-
-  
-  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
-  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-  <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Mathematical underpinnings" href="math.html" />
@@ -75,6 +79,7 @@
           
         </div>
 
+        
         <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
           
             
@@ -94,6 +99,7 @@
             
           
         </div>
+        
       </div>
     </nav>
 
@@ -128,18 +134,20 @@
 
 
 
+
+
 <div role="navigation" aria-label="breadcrumbs navigation">
 
   <ul class="wy-breadcrumbs">
     
-      <li><a href="index.html">Docs</a> &raquo;</li>
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
         
       <li>Basic Usage</li>
     
     
       <li class="wy-breadcrumbs-aside">
         
-            
+          
             <a href="_sources/basic-usage.rst.txt" rel="nofollow"> View page source</a>
           
         
@@ -156,9 +164,9 @@
             
   <div class="section" id="basic-usage">
 <h1>Basic Usage<a class="headerlink" href="#basic-usage" title="Permalink to this headline">¶</a></h1>
-<p>Let’s make small modifications to <a class="reference external" href="https://github.com/pytorch/examples/blob/e9e76722dad4f4569651a8d67ca1d10607db58f9/mnist/main.py">PyTorch’s MNIST example</a>. This example
+<p>Let’s walk through <a class="reference external" href="https://github.com/pytorch/examples/blob/e9e76722dad4f4569651a8d67ca1d10607db58f9/mnist/main.py">PyTorch’s MNIST example</a>. This example
 usage will be trimmed for brevity. The complete script can be found on GitHub
-at <a class="reference external" href="https://github.com/stsievert/adadamp/blob/master/test_mnist.py">test_mnist.py</a>.</p>
+at <a class="reference external" href="https://github.com/stsievert/adadamp/blob/master/test_mnist_dask.py">test_mnist_dask.py</a>.</p>
 <p>First, let’s start by creating the model.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">torch</span>
 <span class="kn">import</span> <span class="nn">torch.nn</span> <span class="k">as</span> <span class="nn">nn</span>
@@ -173,7 +181,6 @@ at <a class="reference external" href="https://github.com/stsievert/adadamp/blob
      <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
         <span class="c1"># etc; unchanged from example</span>
 
-
 <span class="n">model</span> <span class="o">=</span> <span class="n">Net</span><span class="p">()</span>
 </pre></div>
 </div>
@@ -182,51 +189,39 @@ at <a class="reference external" href="https://github.com/stsievert/adadamp/blob
 <span class="n">test_set</span> <span class="o">=</span> <span class="n">datasets</span><span class="o">.</span><span class="n">MNIST</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>  <span class="c1"># internals untouched</span>
 </pre></div>
 </div>
-<p>Notice a <code class="xref py py-class docutils literal notranslate"><span class="pre">DataLoader</span></code> object is not created (as with
+<p>Notice a <a class="reference external" href="https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader" title="(in PyTorch vmaster (1.7.0a0+57bffc3 ))"><code class="xref py py-class docutils literal notranslate"><span class="pre">DataLoader</span></code></a> object is not created (as with
 PyTorch), only the dataset that’s passed to
-<code class="xref py py-class docutils literal notranslate"><span class="pre">DataLoader</span></code>.</p>
-<p>Now, let’s create the loss function to optimize, alongside the optimizer:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">torch.optim</span> <span class="k">as</span> <span class="nn">optim</span>
-<span class="kn">import</span> <span class="nn">torch.nn.functional</span> <span class="k">as</span> <span class="nn">F</span>
-
-<span class="n">_optimizer</span> <span class="o">=</span> <span class="n">optim</span><span class="o">.</span><span class="n">SGD</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">lr</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">lr</span><span class="p">)</span>
-<span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">nll_loss</span>
+<a class="reference external" href="https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader" title="(in PyTorch vmaster (1.7.0a0+57bffc3 ))"><code class="xref py py-class docutils literal notranslate"><span class="pre">DataLoader</span></code></a>.</p>
+<p>Now, let’s create our Scikit-learn wrapper with our model, loss and optimizer:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">adadamp</span> <span class="kn">import</span> <span class="n">DaskClassifier</span>
+<span class="n">est</span> <span class="o">=</span> <span class="n">DaskClassifier</span><span class="p">(</span>
+    <span class="n">module</span><span class="o">=</span><span class="n">Net</span><span class="p">,</span>
+    <span class="n">loss</span><span class="o">=</span><span class="n">nn</span><span class="o">.</span><span class="n">NLLLoss</span><span class="p">,</span>
+    <span class="n">optimizer</span><span class="o">=</span><span class="n">optim</span><span class="o">.</span><span class="n">SGD</span><span class="p">,</span>
+    <span class="n">optimizer__lr</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span>
+    <span class="n">optimizer__momentum</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span>
+    <span class="n">optimizer__nesterov</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="mi">256</span><span class="p">,</span>
+    <span class="n">max_epochs</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+<span class="p">)</span>
 </pre></div>
 </div>
 <p>Again, the optimizer is a pretty standard definition. Use of SGD is recommended
 and backed by mathematics. Use of momentum and Nesterov acceleration is likely
 beneficial even though there’s no backing mathematics.</p>
-<p>Let’s use <a class="reference internal" href="api.html#adadamp.PadaDamp" title="adadamp.PadaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">PadaDamp</span></code></a>, which will grow the batch size and is an
-approximation to the firmly grounded but impractical <a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a>:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">adadamp</span> <span class="kn">import</span> <span class="n">PadaDamp</span>
-
-<span class="n">optimizer</span> <span class="o">=</span> <span class="n">PadaDamp</span><span class="p">(</span>
-    <span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">,</span>
-    <span class="n">dataset</span><span class="o">=</span><span class="n">train_set</span><span class="p">,</span>
-    <span class="n">opt</span><span class="o">=</span><span class="n">_optimizer</span><span class="p">,</span>
-    <span class="n">loss</span><span class="o">=</span><span class="n">loss</span><span class="p">,</span>
-    <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cpu&quot;</span><span class="p">,</span>
-    <span class="n">batch_growth_rate</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>
-    <span class="n">initial_batch_size</span><span class="o">=</span><span class="mi">32</span><span class="p">,</span>
-    <span class="n">max_batch_size</span><span class="o">=</span><span class="mi">1024</span><span class="p">,</span>
-<span class="p">)</span>
+<p>Now, we can feed our data to the <code class="docutils literal notranslate"><span class="pre">fit</span></code> method:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">est</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">train_set</span><span class="p">)</span>
+<span class="n">acc</span> <span class="o">=</span> <span class="n">est</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">test_set</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>This <code class="docutils literal notranslate"><span class="pre">optimizer</span></code> is a drop in replacement for any of PyTorch’s optimizers
-like <code class="xref py py-class docutils literal notranslate"><span class="pre">torch.optim.SGD</span></code> or <code class="xref py py-class docutils literal notranslate"><span class="pre">torch.optim.Adagrad</span></code>. This means that
-we can use it in our (custom) training functions by calling
-<code class="docutils literal notranslate"><span class="pre">optimizer.step()</span></code>.</p>
-<p>However, it might be easier to use the built-in train/test functions:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">adadamp.experiment</span> <span class="kn">import</span> <span class="n">train</span><span class="p">,</span> <span class="n">test</span>
-
-<span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">epochs</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
-    <span class="n">train</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">,</span> <span class="n">opt</span><span class="o">=</span><span class="n">optimizer</span><span class="p">)</span>
-    <span class="n">data</span> <span class="o">=</span> <span class="n">test</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">,</span> <span class="n">loss</span><span class="o">=</span><span class="n">loss</span><span class="p">,</span> <span class="n">dataset</span><span class="o">=</span><span class="n">test_set</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+<p>If desired, we can also feed our function NumPy arrays or Torch Tensors:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">sklearn.datasets</span> <span class="kn">import</span> <span class="n">make_classification</span>
+<span class="n">X</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">make_classification</span><span class="p">()</span>
+<span class="n">est</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<span class="n">X2</span><span class="p">,</span> <span class="n">y2</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">from_numpy</span><span class="p">(</span><span class="n">X</span><span class="p">),</span> <span class="n">torch</span><span class="o">.</span><span class="n">from_numpy</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+<span class="n">est</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X2</span><span class="p">,</span> <span class="n">y2</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>These <code class="docutils literal notranslate"><span class="pre">train</span></code> and <code class="docutils literal notranslate"><span class="pre">test</span></code> functions are small modifications from the
-functions in <a class="reference external" href="https://github.com/pytorch/examples/blob/e9e76722dad4f4569651a8d67ca1d10607db58f9/mnist/main.py">PyTorch’s MNIST example</a>.</p>
 </div>
 
 
@@ -238,29 +233,29 @@ functions in <a class="reference external" href="https://github.com/pytorch/exam
     </a>
 
           <footer>
-  
     <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
-      
-        <a href="math.html" class="btn btn-neutral float-right" title="Mathematical underpinnings" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
-      
-      
-        <a href="installation.html" class="btn btn-neutral float-left" title="Installation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
-      
+        <a href="math.html" class="btn btn-neutral float-right" title="Mathematical underpinnings" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="installation.html" class="btn btn-neutral float-left" title="Installation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
     </div>
-  
 
   <hr/>
 
   <div role="contentinfo">
     <p>
-        &copy; Copyright 2020, Scott Sievert
+        &#169; Copyright 2020, Scott Sievert.
 
     </p>
   </div>
-  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+    
+    
+    
+    Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    
+    provided by <a href="https://readthedocs.org">Read the Docs</a>. 
 
 </footer>
-
         </div>
       </div>
 
@@ -268,7 +263,6 @@ functions in <a class="reference external" href="https://github.com/pytorch/exam
 
   </div>
   
-
 
   <script type="text/javascript">
       jQuery(function () {

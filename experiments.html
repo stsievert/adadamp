@@ -1,23 +1,32 @@
 
 
 <!DOCTYPE html>
-<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
-<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<html class="writer-html5" lang="en" >
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
   
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   
   <title>Experiments &mdash; adadamp  documentation</title>
   
 
   
-  
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+
   
   
 
   
-  <script type="text/javascript" src="_static/js/modernizr.min.js"></script>
+  
+
+  
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
   
     
       <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
@@ -25,16 +34,11 @@
         <script src="_static/underscore.js"></script>
         <script src="_static/doctools.js"></script>
         <script src="_static/language_data.js"></script>
-        <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+        <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
     
     <script type="text/javascript" src="_static/js/theme.js"></script>
 
     
-
-  
-  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
-  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-  <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="API" href="api.html" />
@@ -75,6 +79,7 @@
           
         </div>
 
+        
         <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
           
             
@@ -99,6 +104,7 @@
             
           
         </div>
+        
       </div>
     </nav>
 
@@ -133,18 +139,20 @@
 
 
 
+
+
 <div role="navigation" aria-label="breadcrumbs navigation">
 
   <ul class="wy-breadcrumbs">
     
-      <li><a href="index.html">Docs</a> &raquo;</li>
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
         
       <li>Experiments</li>
     
     
       <li class="wy-breadcrumbs-aside">
         
-            
+          
             <a href="_sources/experiments.rst.txt" rel="nofollow"> View page source</a>
           
         
@@ -187,17 +195,17 @@ methods, we get these results:</p>
 imply a better model. The test loss of the ERM minimizer is shown with the
 dashed line.</span><a class="headerlink" href="#id5" title="Permalink to this image">¶</a></p>
 </div>
-<p>As expected, we find that <a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a> has a minimal number of
+<p>As expected, we find that <code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code> has a minimal number of
 model updates and minimal computation:</p>
 <ul class="simple">
-<li><p><a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a> has the number of model updates as gradient descent</p></li>
-<li><p><a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a> does no more computation than
-<code class="xref py py-class docutils literal notranslate"><span class="pre">SGD</span></code></p></li>
+<li><p><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code> has the number of model updates as gradient descent</p></li>
+<li><p><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code> does no more computation than
+<a class="reference external" href="https://pytorch.org/docs/stable/optim.html#torch.optim.SGD" title="(in PyTorch vmaster (1.7.0a0+57bffc3 ))"><code class="xref py py-class docutils literal notranslate"><span class="pre">SGD</span></code></a></p></li>
 </ul>
 <p>Of course, the batch size of AdaDamp is intense to compute. However, there are
 some workarounds to this; the batch size grows closely follows an exponential
 function as if the bounds were tight. This is some of the motivation behind
-<a class="reference internal" href="api.html#adadamp.PadaDamp" title="adadamp.PadaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">PadaDamp</span></code></a>.</p>
+<code class="xref py py-class docutils literal notranslate"><span class="pre">PadaDamp</span></code>.</p>
 </div>
 <div class="section" id="distributed-system-setup">
 <h2>Distributed system setup<a class="headerlink" href="#distributed-system-setup" title="Permalink to this headline">¶</a></h2>
@@ -243,29 +251,29 @@ K. He. 2018. <a class="reference external" href="https://arXiv.org/abs/1706.0267
     </a>
 
           <footer>
-  
     <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
-      
-        <a href="api.html" class="btn btn-neutral float-right" title="API" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
-      
-      
-        <a href="math.html" class="btn btn-neutral float-left" title="Mathematical underpinnings" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
-      
+        <a href="api.html" class="btn btn-neutral float-right" title="API" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="math.html" class="btn btn-neutral float-left" title="Mathematical underpinnings" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
     </div>
-  
 
   <hr/>
 
   <div role="contentinfo">
     <p>
-        &copy; Copyright 2020, Scott Sievert
+        &#169; Copyright 2020, Scott Sievert.
 
     </p>
   </div>
-  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+    
+    
+    
+    Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    
+    provided by <a href="https://readthedocs.org">Read the Docs</a>. 
 
 </footer>
-
         </div>
       </div>
 
@@ -273,7 +281,6 @@ K. He. 2018. <a class="reference external" href="https://arXiv.org/abs/1706.0267
 
   </div>
   
-
 
   <script type="text/javascript">
       jQuery(function () {
