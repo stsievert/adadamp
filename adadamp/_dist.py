@@ -291,7 +291,6 @@ class DaskBaseDamper:
         self._meta: Dict[str, Number] = {
             "n_updates": 0,
             "n_data": 0,
-            "n_weight_changes": 0,
             "score__calls": 0,
             "partial_fit__calls": 0,
             "n_workers": self.n_workers_,
@@ -414,7 +413,6 @@ class DaskBaseDamper:
         device = torch.device(self.device)
 
         # Run BS items through until hitting every element in dataset
-        _weights = []
         while True:
             model_opt, bs = self.train_step(
                 model_opt,
@@ -425,8 +423,6 @@ class DaskBaseDamper:
                 device=device,
                 **fit_params,
             )
-            weight = client.submit(_weight_sum, model_opt)
-            _weights.append(weight)
 
             # exit condition
             self._meta["n_updates"] += 1
@@ -437,8 +433,6 @@ class DaskBaseDamper:
         m, o = model_opt.result()
         self.module_ = m
         self.optimizer_ = o
-        weights = client.gather(_weights)
-        self._meta["n_weight_changes"] += len(np.unique(weights))
         return True
 
     def score(self, X, y):
@@ -544,7 +538,6 @@ class DaskClassifier(DaskBaseDamper):
             "partial_fit__time": time() - start,
             "partial_fit__batch_size": self.batch_size_(),
             "partial_fit__lr": lr,
-            "weight_aggregate": _get_model_weights(self.module_),
         }
         self._meta.update(stat)
         self._meta["partial_fit__calls"] += 1
