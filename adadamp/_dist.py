@@ -27,15 +27,8 @@ Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
 
 
 def _get_model_weights(model):
-    return sum(torch.abs(torch.sum(param)).item() for param in model.parameters())
-
-
-def _get_model_grads(model):
-    return sum(
-        torch.abs(torch.sum(param.grad)).item()
-        for param in model.parameters()
-        if param.grad is not None
-    )
+    with torch.no_grad():
+        return sum(torch.abs(torch.sum(param)).item() for param in model.parameters())
 
 
 def _weight_sum(model_opt):
@@ -103,9 +96,6 @@ def gradient(
     # Workaround: Gradients should be cleared when entering this funciton,
     #     but at this moment this behavior is not occuring
     model = deepcopy(model_opt[0])
-
-    if _get_model_grads(model) != 0:
-        warn("ERROR Gradients not zero'd at grad time")
 
     start = time()
 
@@ -181,10 +171,6 @@ def _update_model(
     if np.allclose(old_weights, new_weights):
         diff = new_weights - old_weights
         warn("Model appears not to update with weight difference {diff}")
-
-    if _get_model_grads(model) >= 1e-6:
-        s = _get_model_grads(model)
-        warn(f"opt.zero_grad() not clearing gradients, {s}")
 
     return model, optimizer
 
