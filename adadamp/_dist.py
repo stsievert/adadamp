@@ -135,6 +135,8 @@ class DaskBaseDamper:
     optimizer : torch.optim.Optimizer
     batch_size : int
         The batch size to use.
+    max_batch_size : int, optional (default: 4096).
+        The maximum batch size to use.
     min_workers : int
         The minimum number of workers available
     max_workers : int
@@ -172,6 +174,7 @@ class DaskBaseDamper:
         optimizer: Optimizer,
         *,
         batch_size: int=32,
+        max_batch_size: Optional[int] = 4096,
         min_workers: int=1,
         max_workers: int=8,
         device: str = "cpu",
