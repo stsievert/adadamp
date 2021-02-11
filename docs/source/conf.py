@@ -21,6 +21,8 @@ project = "adadamp"
 copyright = "2020, Scott Sievert"
 author = "Scott Sievert"
 
+intersphinx_mapping = {'torch': ('https://pytorch.org/docs/stable', None),
+                       'numpy': ('https://numpy.org/doc/stable/', None)}
 
 # -- General configuration ---------------------------------------------------
 
@@ -29,7 +31,7 @@ author = "Scott Sievert"
 # ones.
 #  extensions = ["sphinx.ext.autodoc", "numpydoc", "sphinx.ext.imgmath"]
 #  imgmath_image_format = "svg"
-extensions = ["sphinx.ext.autodoc", "sphinx.ext.napoleon"]
+extensions = ["sphinx.ext.autodoc", "sphinx.ext.intersphinx", "sphinx.ext.napoleon", "sphinx.ext.autosummary"]
 autosummary_generate = True
 autosummary_generate_overwrite = True
 
