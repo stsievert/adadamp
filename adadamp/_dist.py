@@ -90,7 +90,6 @@ def gradient(
     """
     # Workaround: Gradients should be cleared when entering this funciton,
     #     but at this moment this behavior is not occuring
-    #  model = deepcopy(model_opt[0])
     model = model_opt[0]
 
     start = time()
