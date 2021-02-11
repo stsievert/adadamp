@@ -31,7 +31,7 @@ def _get_model_weights(model: nn.Module) -> float:
         s = 0.0
         params = list(model.parameters())
         for k, param in enumerate(reversed(params)):
-            s += torch.sum(torch.abs(param)).item()
+            s += torch.linalg.norm(param).item()
             if k >= 2:
                 break
     return s
