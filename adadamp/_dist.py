@@ -27,7 +27,13 @@ Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
 
 
 def _get_model_weights(model: nn.Module) -> float:
-    return sum(torch.abs(torch.sum(param)).item() for param in model.parameters())
+    with torch.no_grad():
+        s = 0.0
+        for k, param in enumerate(model.parameters()):
+            s += torch.sum(torch.abs(param)).item()
+            if k >= 2:
+                break
+    return s
 
 
 def _set_random_state(seed: int, device="cuda") -> bool:
@@ -90,7 +96,7 @@ def gradient(
     """
     # Workaround: Gradients should be cleared when entering this funciton,
     #     but at this moment this behavior is not occuring
-    model = model_opt[0]
+    model = deepcopy(model_opt[0])
 
     start = time()
 
@@ -164,8 +170,8 @@ def _update_model(
     new_weights = _get_model_weights(model)
 
     if np.allclose(old_weights, new_weights):
-        diff = new_weights - old_weights
-        warn("Model appears not to update with weight difference {diff}")
+        diff = abs(new_weights - old_weights)
+        warn(f"Model appears not to update with diff={diff} > 0")
 
     return model, optimizer
 
