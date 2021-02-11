@@ -29,7 +29,8 @@ Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
 def _get_model_weights(model: nn.Module) -> float:
     with torch.no_grad():
         s = 0.0
-        for k, param in enumerate(model.parameters()):
+        params = list(model.parameters())
+        for k, param in enumerate(reversed(params)):
             s += torch.sum(torch.abs(param)).item()
             if k >= 2:
                 break
@@ -169,9 +170,9 @@ def _update_model(
 
     new_weights = _get_model_weights(model)
 
-    if np.allclose(old_weights, new_weights):
-        diff = abs(new_weights - old_weights)
-        warn(f"Model appears not to update with diff={diff} > 0")
+    rel_error = abs(new_weights - old_weights) / abs(old_weights)
+    if np.allclose(rel_error, 0):
+        warn(f"Model appears not to update with diff={rel_error}, which is about 0")
 
     return model, optimizer
 
