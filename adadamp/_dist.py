@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Union, Tuple, NewType
 from warnings import warn
 
 import dask
+import dask.array as da
 import numpy as np
 import torch
 import torch.nn as nn
@@ -17,7 +18,7 @@ from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
 
 from torch.autograd import Variable
-from torch.utils.data import Dataset, IterableDataset, TensorDataset
+from torch.utils.data import Dataset, IterableDataset, TensorDataset, DataLoader
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
 Number = Union[int, float, np.integer, np.float]
@@ -25,20 +26,15 @@ Model = NewType("Model", torch.nn.Module)
 Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
 
 
-def _get_model_weights(model):
-    return sum(torch.abs(torch.sum(param)).item() for param in model.parameters())
-
-
-def _get_model_grads(model):
-    return sum(
-        torch.abs(torch.sum(param.grad)).item()
-        for param in model.parameters()
-        if param.grad is not None
-    )
-
-
-def _weight_sum(model_opt):
-    return _get_model_weights(model_opt[0])
+def _get_model_weights(model: nn.Module) -> float:
+    with torch.no_grad():
+        s = 0.0
+        params = list(model.parameters())
+        for k, param in enumerate(reversed(params)):
+            s += torch.linalg.norm(param).item()
+            if k >= 2:
+                break
+    return s
 
 
 def _set_random_state(seed: int, device="cuda") -> bool:
@@ -103,21 +99,15 @@ def gradient(
     #     but at this moment this behavior is not occuring
     model = deepcopy(model_opt[0])
 
-    if _get_model_grads(model) != 0:
-        warn("ERROR Gradients not zero'd at grad time")
-
     start = time()
 
     # set up data
-    data_target = [train_set[i] for i in idx]
-    _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
-    _targets = [d[1] for d in data_target]
-    inputs = torch.cat(_inputs).to(device)
-    targets = torch.tensor(_targets).to(device)
+    idx.sort()
+    _data, _target = train_set[idx]
 
     # split by max bastch size
-    Data = torch.split(inputs, max_bs)
-    Target = torch.split(targets, max_bs)
+    Data = torch.split(_data, max_bs)
+    Target = torch.split(_target, max_bs)
 
     # Zero gradients
     for p in model.parameters():
@@ -165,14 +155,14 @@ def _update_model(
     # Make sure the model and optimizer are connected
     init_lr = None
     for g in optimizer.param_groups:
-        init_lr = float(g['lr'])
+        init_lr = float(g["lr"])
 
     optimizer.param_groups = []
     optimizer.add_param_group({"params": list(model.parameters())})
-    
+
     # Re-set learning rate from initial optimizer
     for g in optimizer.param_groups:
-        g['lr'] = init_lr
+        g["lr"] = init_lr
 
     # update model
     optimizer.step()
@@ -180,13 +170,9 @@ def _update_model(
 
     new_weights = _get_model_weights(model)
 
-    if np.allclose(old_weights, new_weights):
-        diff = new_weights - old_weights
-        warn("Model appears not to update with weight difference {diff}")
-
-    if _get_model_grads(model) >= 1e-6:
-        s = _get_model_grads(model)
-        warn(f"opt.zero_grad() not clearing gradients, {s}")
+    rel_error = abs(new_weights - old_weights) / abs(old_weights)
+    if np.allclose(rel_error, 0):
+        warn(f"Model appears not to update with diff={rel_error}, which is about 0")
 
     return model, optimizer
 
@@ -229,6 +215,29 @@ class DaskBaseDamper:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
+    @staticmethod
+    def preprocess(ds: Dataset) -> TensorDataset:
+        """
+        Turn a PyTorch dataset into Torch Tensors.
+
+        This will require a moderate amount of memory. For image datasets where
+        each pixel is transformed from uint8 to float32, this will require a
+        factor of 4 more memory. For the popular MNIST and CIFAR datasets, this
+        means 37MB → 150MB and 175MB → 703MB respectively.
+
+        These data are not stored on the training devices (/GPUs), so
+        essentially only the transformations are preformed.
+
+        """
+        loader = DataLoader(ds, shuffle=False, batch_size=1000)
+        data_target = [d for d in loader]
+        n_tensors = len(data_target[0])
+        tensors = []
+        for i in range(n_tensors):
+            tensor = [d[i] for d in data_target]
+            tensors.append(torch.cat(tensor))
+        return TensorDataset(*tensors)
+
     def _get_param_names(self):
         return [k for k in self.__dict__ if k[0] != "_" and k[-1] != "_"]
 
@@ -270,7 +279,6 @@ class DaskBaseDamper:
         self._meta: Dict[str, Number] = {
             "n_updates": 0,
             "n_data": 0,
-            "n_weight_changes": 0,
             "score__calls": 0,
             "partial_fit__calls": 0,
             "n_workers": self.n_workers_,
@@ -313,7 +321,7 @@ class DaskBaseDamper:
             self.cluster.scale(self.n_workers_)
 
         self._meta.update({"n_workers": self.n_workers_})
-        
+
         # compute grads
         grads = self._get_gradients(
             epoch_n_data,
@@ -331,21 +339,23 @@ class DaskBaseDamper:
 
         return model_opt, bs
 
-    def _get_dataset(self, X, y=None) -> Dataset:
-        if isinstance(X, Dataset):
+    def _get_dataset(self, X, y=None) -> TensorDataset:
+        if isinstance(X, TensorDataset):
             return X
-        if isinstance(X, list):
-            X = np.ndarray(X)
-        if isinstance(X, np.ndarray):
-            X = torch.from_numpy(X)
-        if isinstance(y, list) and len(y):
-            y = np.ndarray(y)
-        if isinstance(y, np.ndarray):
-            y = torch.from_numpy(y)
+        elif isinstance(X, Dataset):
+            return self.preprocess(X)
+        else:
+            if isinstance(X, list):
+                X = np.ndarray(X)
+            if isinstance(X, np.ndarray):
+                X = torch.from_numpy(X)
+            if isinstance(y, list) and len(y):
+                y = np.ndarray(y)
+            if isinstance(y, np.ndarray):
+                y = torch.from_numpy(y)
 
-        device = torch.device(self.device)
-        args = (X.to(device), y.to(device)) if y is not None else (X.to(device),)
-        return TensorDataset(*args)
+            args = (X, y) if y is not None else (X,)
+            return TensorDataset(*args)
 
     def fit(self, X, y=None, **fit_params):
         for epoch in range(self.max_epochs):
@@ -377,7 +387,7 @@ class DaskBaseDamper:
 
         # Send the model/optimizer to workers
         m = client.scatter(self.module_)
-        
+
         o = client.scatter(self.optimizer_)
         model_opt = client.submit(lambda x, y: (x, y), m, o)
 
@@ -391,7 +401,6 @@ class DaskBaseDamper:
         device = torch.device(self.device)
 
         # Run BS items through until hitting every element in dataset
-        _weights = []
         while True:
             model_opt, bs = self.train_step(
                 model_opt,
@@ -402,8 +411,6 @@ class DaskBaseDamper:
                 device=device,
                 **fit_params,
             )
-            weight = client.submit(_weight_sum, model_opt)
-            _weights.append(weight)
 
             # exit condition
             self._meta["n_updates"] += 1
@@ -414,8 +421,6 @@ class DaskBaseDamper:
         m, o = model_opt.result()
         self.module_ = m
         self.optimizer_ = o
-        weights = client.gather(_weights)
-        self._meta["n_weight_changes"] += len(np.unique(weights))
         return True
 
     def score(self, X, y):
@@ -478,7 +483,9 @@ class DaskBaseDamper:
         # Iterate through the dataset in batches
         # TODO: integrate with IterableDataset (this is pretty much already
         # an IterableDataset but without vectorization)
-        idx = self.random_state_.choice(len_dataset, size=min(batch_size, len_dataset), replace=False)
+        idx = self.random_state_.choice(
+            len_dataset, size=min(batch_size, len_dataset), replace=False
+        )
         idx.sort()
         worker_idxs = np.array_split(idx, n_workers)
 
@@ -519,7 +526,6 @@ class DaskClassifier(DaskBaseDamper):
             "partial_fit__time": time() - start,
             "partial_fit__batch_size": self.batch_size_(),
             "partial_fit__lr": lr,
-            "weight_aggregate": _get_model_weights(self.module_),
         }
         self._meta.update(stat)
         self._meta["partial_fit__calls"] += 1
@@ -578,7 +584,7 @@ class DaskClassifierExpiriments(DaskClassifier):
         """
         Sets LR to passed value
         """
-        
+
         if not hasattr(self, "initialized_") or not self.initialized_:
             self.initialize()
 

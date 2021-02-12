@@ -6,6 +6,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import Subset
 import numpy as np
 from distributed.utils_test import gen_cluster
+from dask.distributed import Client
 
 from adadamp import DaskBaseDamper
 
@@ -28,8 +29,7 @@ class Model(nn.Module):
         return output
 
 
-@gen_cluster(client=True)
-def test_mnist_w_dask(c, s, a, b):
+def test_mnist_w_dask(preprocess=False):
     N = 4096
     batch_size = 1024
     net = DaskBaseDamper(
@@ -47,9 +47,20 @@ def test_mnist_w_dask(c, s, a, b):
     )
     dataset = datasets.MNIST("./data", train=True, download=True, transform=transform)
     trimmed = Subset(dataset, np.arange(N).astype(int))
-    #  n, d = 100, 10
-    #  X = np.random.uniform(size=(n, d))
-    #  y = np.random.uniform(size=n)
-    #  _ = net.fit(X, y)
-    _ = net.fit(trimmed)
-    assert True  # sanity check
+    if not preprocess:
+        _ = net.fit(trimmed)
+    else:
+        ds2 = net.preprocess(trimmed)
+        _ = net.fit(ds2)
+    assert net.meta_["n_updates"] == 4
+
+
+def _prep():
+    from distributed.protocol import torch
+
+
+if __name__ == "__main__":
+    client = Client()
+    client.run(_prep)
+    for preprocess in [True, False]:
+        test_mnist_w_dask(preprocess=preprocess)
