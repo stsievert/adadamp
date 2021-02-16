@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import random
 from torch.optim import Optimizer
-from time import time
+from time import sleep, time
 from distributed import get_client
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
@@ -606,10 +606,6 @@ class DaskClassifierSimulator(DaskClassifierExpiriments):
         """
         self._sim_data = dic
         
-    def initialize(self):
-        self._sim_data = None
-        super().initialize()
-        
     def _get_gradients(
         self,
         start_idx,
@@ -665,27 +661,28 @@ class DaskClassifierSimulator(DaskClassifierExpiriments):
         # Distribute the computation of the gradient. In practice this will
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
-        total_time = self._sim_data["partial_fit__time"]
-        grads_per_worker = self._sim_data["grads_per_worker"]
-        batch_size = self._sim_data["partial_fit__batch_size"]
-        time = total_time / (batch_size/grads_per_worker)
         
         grads = [
             client.submit(
-                sim_gradient, time, model_opt, dataset, device=device, idx=idx
+                sim_gradient, 0, model_opt, dataset, device=device, idx=idx
             )
             for idx in worker_idxs
         ]
-        
-        # what should the size of grads be?
-        return None
+
+        return grads
     
     def score(self, X, y=None):
-        score_time = self._sim_data["partial_fit__time"]
-        time.sleep(score_time)
+        score_time = 0.0000001 # self._sim_data["partial_fit__time"]
+        sleep(score_time)
         return 0.123456789
 
+    
+def _randomize(x: torch.Tensor):
+    p = np.random.uniform(low=1, high=2)
+    return x**p
 
+DEEPCOPY_TIME = 0.00000001 # 0.05855  # seconds
+GRAD_TIME_128 = 0.00000001 # 0.07832  # seconds
 
 def sim_gradient(
     timing,
@@ -697,18 +694,16 @@ def sim_gradient(
     max_bs: int = 1024,
 ) -> Grads:
     
-    # Workaround: Gradients should be cleared when entering this funciton,
-    #     but at this moment this behavior is not occuring
-    model = deepcopy(model_opt[0])
-
-    # still wanna load data normally for accurate data
-    data_target = [train_set[i] for i in idx]
-    _inputs = [d[0].reshape(-1, *d[0].size()) for d in data_target]
-    _targets = [d[1] for d in data_target]
-    inputs = torch.cat(_inputs).to(device)
-    targets = torch.tensor(_targets).to(device)
+    sleep(DEEPCOPY_TIME)
+    sleep(GRAD_TIME_128 * len(idx) / 128)
     
-    time.sleep(timing)
+    model = model_opt[0]
     
-    return None # what size should this be?
+    grads = {k: _randomize(v.data) for k, v in model.named_parameters()}
     
+    return {
+        "_num_data": 1,
+        "_time": 1,
+        "_loss": 1,
+        **grads,
+    }
