@@ -598,6 +598,12 @@ class DaskClassifierExpiriments(DaskClassifier):
         self.batch_size = bs
     
         
+        
+        
+SCORE_TIME = 0.0 # 5.39407711148262
+DEEPCOPY_TIME = 0.0 # 0.05855  # seconds
+GRAD_TIME_128 = 0.0 # 0.07832  # seconds
+        
 class DaskClassifierSimulator(DaskClassifierExpiriments):
     
     def set_sim(self, dic):
@@ -605,6 +611,8 @@ class DaskClassifierSimulator(DaskClassifierExpiriments):
         Sets simulation data for next epoch
         """
         self._sim_data = dic
+        self.set_lr(dic['partial_fit__lr'])
+        self.set_bs(dic['partial_fit__batch_size'])
         
     def _get_gradients(
         self,
@@ -672,17 +680,26 @@ class DaskClassifierSimulator(DaskClassifierExpiriments):
         return grads
     
     def score(self, X, y=None):
-        score_time = 0.0000001 # self._sim_data["partial_fit__time"]
+        
+        # sleep
+        score_time = SCORE_TIME
         sleep(score_time)
-        return 0.123456789
+        
+        # update internal stats
+        stat = {
+            "score__acc": self._sim_data["score__acc"],
+            "score__loss": self._sim_data["score__loss"],
+            "score__time": SCORE_TIME,
+        }
+        self._meta.update(stat)
+        self._meta["score__calls"] += 1
+        
+        return stat['score__acc']
 
     
 def _randomize(x: torch.Tensor):
     p = np.random.uniform(low=1, high=2)
     return x**p
-
-DEEPCOPY_TIME = 0.00000001 # 0.05855  # seconds
-GRAD_TIME_128 = 0.00000001 # 0.07832  # seconds
 
 def sim_gradient(
     timing,
