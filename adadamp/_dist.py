@@ -187,7 +187,8 @@ class DaskBaseDamper:
         metrics=None,
         batch_size=32,
         cluster=None,
-        max_batch_size=1024,
+        max_batch_size=None,
+        worker_max_batch_size=1024,
         min_workers=1,
         max_workers=8,
         device: str = "cpu",
@@ -207,6 +208,7 @@ class DaskBaseDamper:
 
         self.batch_size = batch_size
         self.max_batch_size = max_batch_size
+        self.worker_max_batch_size = worker_max_batch_size
         self.min_workers = min_workers
         self.max_workers = max_workers
         self.n_workers_ = min_workers
@@ -316,6 +318,11 @@ class DaskBaseDamper:
             The number of data processed.
         """
         bs = self.batch_size_()
+        if self.max_batch_size and bs >= self.max_batch_size:
+            factor = self.max_batch_size / bs
+            assert factor >= 1, factor
+            self._set_lr(factor * self._get_lr())
+
         self.n_workers_ = bs // self.grads_per_worker
         if self.cluster:
             self.cluster.scale(self.n_workers_)
@@ -507,6 +514,21 @@ class DaskBaseDamper:
     def _get_tags(self):
         return BaseEstimator()._get_tags()
 
+    def _get_lr(self) -> float:
+        if not hasattr(self, "initialized_") or not self.initialized_:
+            self.initialize()
+
+        for g in self.optimizer_.param_groups:
+            break
+        return g["lr"]
+
+    def _set_lr(self, lr: float):
+        if not hasattr(self, "initialized_") or not self.initialized_:
+            self.initialize()
+
+        for g in self.optimizer_.param_groups:
+            g["lr"] = lr
+
 
 class DaskClassifier(DaskBaseDamper):
     def partial_fit(self, X, y=None, **fit_params):
@@ -517,10 +539,7 @@ class DaskClassifier(DaskBaseDamper):
         super().partial_fit(X, y=y, **fit_params)
 
         # get lr
-        lr = 0
-        for param_group in self.optimizer_.param_groups:
-            lr = param_group["lr"]
-            break
+        lr = self._get_lr()
 
         stat = {
             "partial_fit__time": time() - start,
@@ -580,40 +599,27 @@ class DaskClassifier(DaskBaseDamper):
 
 
 class DaskClassifierExpiriments(DaskClassifier):
-    def set_lr(self, lr):
-        """
-        Sets LR to passed value
-        """
+    def _set_bs(self, bs: int):
+        self._batch_size = bs
 
-        if not hasattr(self, "initialized_") or not self.initialized_:
-            self.initialize()
+    def batch_size_(self) -> int:
+        return self._batch_size
 
-        for g in self.optimizer_.param_groups:
-            g["lr"] = lr
 
-    def set_bs(self, bs):
-        """
-        Updates batch size
-        """
-        self.batch_size = bs
-    
-        
-        
-        
-SCORE_TIME = 0.0 # 5.39407711148262
-DEEPCOPY_TIME = 0.0 # 0.05855  # seconds
-GRAD_TIME_128 = 0.0 # 0.07832  # seconds
-        
+SCORE_TIME = 0.0  # 5.39407711148262
+DEEPCOPY_TIME = 0.0  # 0.05855  # seconds
+GRAD_TIME_128 = 0.0  # 0.07832  # seconds
+
+
 class DaskClassifierSimulator(DaskClassifierExpiriments):
-    
     def set_sim(self, dic):
         """
         Sets simulation data for next epoch
         """
         self._sim_data = dic
-        self.set_lr(dic['partial_fit__lr'])
-        self.set_bs(dic['partial_fit__batch_size'])
-        
+        self.set_lr(dic["partial_fit__lr"])
+        self.set_bs(dic["partial_fit__batch_size"])
+
     def _get_gradients(
         self,
         start_idx,
@@ -662,29 +668,29 @@ class DaskClassifierSimulator(DaskClassifierExpiriments):
         # Iterate through the dataset in batches
         # TODO: integrate with IterableDataset (this is pretty much already
         # an IterableDataset but without vectorization)
-        idx = self.random_state_.choice(len_dataset, size=min(batch_size, len_dataset), replace=False)
+        idx = self.random_state_.choice(
+            len_dataset, size=min(batch_size, len_dataset), replace=False
+        )
         idx.sort()
         worker_idxs = np.array_split(idx, n_workers)
 
         # Distribute the computation of the gradient. In practice this will
         # mean (say) 4 GPUs to accelerate the gradient computation. Right now
         # for ease it's a small network that doesn't need much acceleration.
-        
+
         grads = [
-            client.submit(
-                sim_gradient, 0, model_opt, dataset, device=device, idx=idx
-            )
+            client.submit(sim_gradient, 0, model_opt, dataset, device=device, idx=idx)
             for idx in worker_idxs
         ]
 
         return grads
-    
+
     def score(self, X, y=None):
-        
+
         # sleep
         score_time = SCORE_TIME
         sleep(score_time)
-        
+
         # update internal stats
         stat = {
             "score__acc": self._sim_data["score__acc"],
@@ -693,13 +699,14 @@ class DaskClassifierSimulator(DaskClassifierExpiriments):
         }
         self._meta.update(stat)
         self._meta["score__calls"] += 1
-        
-        return stat['score__acc']
 
-    
+        return stat["score__acc"]
+
+
 def _randomize(x: torch.Tensor):
     p = np.random.uniform(low=1, high=2)
-    return x**p
+    return x ** p
+
 
 def sim_gradient(
     timing,
@@ -710,14 +717,14 @@ def sim_gradient(
     idx: IntArray,
     max_bs: int = 1024,
 ) -> Grads:
-    
+
     sleep(DEEPCOPY_TIME)
     sleep(GRAD_TIME_128 * len(idx) / 128)
-    
+
     model = model_opt[0]
-    
+
     grads = {k: _randomize(v.data) for k, v in model.named_parameters()}
-    
+
     return {
         "_num_data": 1,
         "_time": 1,
