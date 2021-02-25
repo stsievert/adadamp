@@ -58,23 +58,90 @@ def test_dask_damper_updates():
         "weight_decay": 1e-5,
         "loss": nn.MSELoss,
         "optimizer": optim.SGD,
-        "optimizer__lr": 0.1,
+        "optimizer__lr": 1e-3,
         "device": device,
     }
 
-    est1 = DaskBaseDamper(**kwargs)
+    est1 = DaskBaseDamper(**kwargs).initialize()
+    score1 = {"initial": est1.score(X, y)}
     est1.partial_fit(X, y)
-    assert est1.meta_["n_weight_changes"] == est1.meta_["n_updates"] == n_updates
 
     # run partial fit many times. Each partial fit does one update
-    est2 = DaskBaseDamper(**kwargs)
+    est2 = DaskBaseDamper(**kwargs).initialize()
+    score2 = {"initial": est2.score(X, y)}
     for k in range(n_updates):
         idx = np.arange(batch_size * k, batch_size * (k + 1)).astype(int)
         est2.partial_fit(X[idx], y[idx])
-    assert est2.meta_["n_weight_changes"] == n_updates
+    score1["final"] = est1.score(X, y)
+    score2["final"] = est2.score(X, y)
+    assert np.allclose(score1["initial"], score2["initial"])
+    assert max(score1["final"], score2["final"]) < score1["initial"] / 4
+
+
+def test_max_batch_size():
+    batch_size = 128
+    n_updates = 5
+
+    n = n_updates * batch_size
+    d = 10
+
+    X, y = _random_dataset(n, d)
+    y = y.reshape(-1, 1)
+
+    device = "cpu" if not torch.cuda.is_available() else "cuda:0"
+
+    est = DaskBaseDamper(
+        module=LinearNet,
+        module__d=d,
+        loss=nn.MSELoss,
+        max_batch_size=128,
+        batch_size=256,
+        optimizer=optim.Adadelta,
+        lr=1,
+    )
+    est.partial_fit(X, y)
+    assert est.meta_["lr_"] == 0.5
+    assert est.meta_["batch_size_"] == 128
+
+
+def test_max_batch_size():
+    batch_size = 128
+    n_updates = 5
+
+    n = n_updates * batch_size
+    d = 10
+
+    X, y = _random_dataset(n, d)
+    #  y = y.reshape(-1, 1)
+
+    device = "cpu" if not torch.cuda.is_available() else "cuda:0"
+
+    bs = 256
+    mbs = bs * 4
+    lr = 1
+    est = DaskBaseDamper(
+        module=LinearNet,
+        module__d=d,
+        loss=nn.MSELoss,
+        max_batch_size=mbs,
+        batch_size=bs,
+        optimizer=optim.Adadelta,
+        lr=lr,
+    )
+    for i in range(1, 8):
+        d = est.batch_size * i
+        est.damping_ = d
+        est.partial_fit(X, y)
+        assert est.meta_["batch_size_"] == min(mbs, bs * i)
+        factor = est.meta_["batch_size_"] / est.meta_["damping_"]
+        assert est.meta_["lr_"] == factor * lr
+
+        noise_level = est.meta_["batch_size_"] / est.meta_["lr_"]
+        assert np.allclose(noise_level, 256 * i)
 
 
 if __name__ == "__main__":
     client = Client()
     client.run(_prep)
     test_dask_damper_updates()
+    test_max_batch_size()

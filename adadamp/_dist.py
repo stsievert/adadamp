@@ -29,8 +29,8 @@ Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
 def _get_model_weights(model: nn.Module) -> float:
     with torch.no_grad():
         s = 0.0
-        params = list(model.parameters())
-        for k, param in enumerate(reversed(params)):
+        params = model.parameters()
+        for k, param in enumerate(params):
             s += torch.linalg.norm(param).item()
             if k >= 2:
                 break
@@ -172,7 +172,7 @@ def _update_model(
 
     rel_error = abs(new_weights - old_weights) / abs(old_weights)
     if np.allclose(rel_error, 0):
-        warn(f"Model appears not to update with diff={rel_error}, which is about 0")
+        warn(f"Model appears not to update with diff={rel_error}")
 
     return model, optimizer
 
@@ -188,6 +188,7 @@ class DaskBaseDamper:
         batch_size=32,
         cluster=None,
         max_batch_size=None,
+        lr=1,
         worker_max_batch_size=1024,
         min_workers=1,
         max_workers=8,
@@ -205,6 +206,7 @@ class DaskBaseDamper:
         self.cluster = cluster
         self.grads_per_worker = grads_per_worker
         self.max_epochs = max_epochs
+        self.lr = lr
 
         self.batch_size = batch_size
         self.max_batch_size = max_batch_size
@@ -261,10 +263,12 @@ class DaskBaseDamper:
         }
 
     def initialize(self, *args, **kwargs):
+        if self.max_batch_size is not None and self.lr is None:
+            raise ValueError("lr needs to be set if max_batch_size is set")
         module_kwargs = self._get_kwargs_for("module")
-        opt_kwargs = self._get_kwargs_for("optimizer")
+        opt_kwargs = {"lr": self.lr}
+        opt_kwargs.update(self._get_kwargs_for("optimizer"))
         loss_kwargs = self._get_kwargs_for("loss")
-
         self.random_state_ = check_random_state(self.random_state)
 
         limit = 2 ** 32 - 1
@@ -278,6 +282,7 @@ class DaskBaseDamper:
         self.module_.to(torch.device(self.device))
         self.optimizer_ = self.optimizer(self.module_.parameters(), **opt_kwargs)
         self.loss_ = self.loss(reduction="sum", **loss_kwargs)
+        self.damping_ = self.batch_size
         self._meta: Dict[str, Number] = {
             "n_updates": 0,
             "n_data": 0,
@@ -286,9 +291,15 @@ class DaskBaseDamper:
             "n_workers": self.n_workers_,
         }
         self.initialized_ = True
+        return self
 
-    def batch_size_(self):
-        return self.batch_size
+    @property
+    def damping_(self):
+        return self._damping
+
+    @damping_.setter
+    def damping_(self, d: float):
+        self._damping = d
 
     def train_step(
         self,
@@ -317,11 +328,16 @@ class DaskBaseDamper:
         n_data : int
             The number of data processed.
         """
-        bs = self.batch_size_()
-        if self.max_batch_size and bs >= self.max_batch_size:
+        damping = self.damping_
+        lr = self._get_lr()
+        bs = damping
+        if self.max_batch_size and self.lr and bs > self.max_batch_size:
             factor = self.max_batch_size / bs
-            assert factor >= 1, factor
-            self._set_lr(factor * self._get_lr())
+            assert factor < 1, factor
+            lr = self.lr * factor
+            self._set_lr(lr)
+            bs = self.max_batch_size
+        self._meta.update({"damping_": damping, "batch_size_": bs, "lr_": lr})
 
         self.n_workers_ = bs // self.grads_per_worker
         if self.cluster:
@@ -370,10 +386,13 @@ class DaskBaseDamper:
         return self
 
     def partial_fit(self, X, y=None, **fit_params):
+        start = time()
         if not hasattr(self, "initialized_") or not self.initialized_:
             self.initialize()
 
         self.run_single_epoch(X, y=y, **fit_params)
+        self._meta["partial_fit__time"] = time() - start
+        self._meta["partial_fit__calls"] += 1
         return self
 
     def run_single_epoch(self, X, y=None, **fit_params):
@@ -537,25 +556,6 @@ class DaskBaseDamper:
 
 
 class DaskClassifier(DaskBaseDamper):
-    def partial_fit(self, X, y=None, **fit_params):
-        """
-        Runs 1 epoch on the given data and model
-        """
-        start = time()
-        super().partial_fit(X, y=y, **fit_params)
-
-        # get lr
-        lr = self._get_lr()
-
-        stat = {
-            "partial_fit__time": time() - start,
-            "partial_fit__batch_size": self.batch_size_(),
-            "partial_fit__lr": lr,
-        }
-        self._meta.update(stat)
-        self._meta["partial_fit__calls"] += 1
-        return self
-
     def score(self, X, y=None):
         if not hasattr(self, "initialized_") or not self.initialized_:
             self.initialize()
@@ -605,7 +605,7 @@ class DaskClassifier(DaskBaseDamper):
 
 
 class DaskClassifierExpiriments(DaskClassifier):
-    def _set_bs(self, bs: int):
+    def set_damping(self, bs: int):
         self._batch_size = bs
 
     def batch_size_(self) -> int:
