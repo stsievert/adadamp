@@ -501,7 +501,13 @@ class DaskBaseDamper:
         # for ease it's a small network that doesn't need much acceleration.
         grads = [
             client.submit(
-                gradient, model_opt, dataset, device=device, loss=loss, idx=idx
+                gradient,
+                model_opt,
+                dataset,
+                device=device,
+                loss=loss,
+                idx=idx,
+                max_bs=self.worker_max_batch_size,
             )
             for idx in worker_idxs
         ]
