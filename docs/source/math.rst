@@ -85,13 +85,11 @@ can be found in Section 4.1 of Sievert et.  al [1]_.
 How should the batch size grow?
 -------------------------------
 
-`To be completed. Detailed in Section 4.2 of` [1]_.
+For neural networks, a method that geometrically increases the batch size as a
+function of epochs has shown really good performance. [3]_
 
-Convergence
------------
-
-`To be completed. Detailed in Section 4.2 of` [1]_.
-
+If you have a strongly convex problem, it should grow geometrically with the
+number of model updates (not epochs). [4]_
 
 .. [1] "Improving the convergence of SGD with adaptive batch
    sizes".  Scott Sievert and Zachary Charles. 2019.
@@ -100,3 +98,10 @@ Convergence
 .. [2] "Gradient Diversity: a Key Ingredient for Scalable Distributed
    Learning". D Yin, A Pananjady, M Lam, D Papailiopoulos, K Ramchandran, P
    Bartlett. 2018. https://arxiv.org/abs/1706.05699
+
+.. [3] "Don't Decay the Learning Rate, Increase the Batch Size". Samuel L.
+       Smith, Pieter-Jan Kindermans, Chris Ying, and Quoc V. Le. 2017.
+       https://arxiv.org/abs/1711.00489
+
+.. [4] Chapter 5 of "Optimization methods for large-scale machine learning."
+   Bottou, Leon and Curtis, Frank E and Nocedal, Jorge. 2018. https://arxiv.org/abs/1606.04838
