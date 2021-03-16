@@ -32,7 +32,7 @@ does introduce some more complexity into the loss function (mostly
 non-convexity). When we run our adaptive method against other competing
 methods, we get these results:
 
-.. figure:: assets/synth.svg
+.. figure:: images/synth.svg
    :align: center
 
    The loss for various optimizers on the neural network above. Lower values
@@ -66,7 +66,7 @@ amount time regardless of the batch size [imagenet-1hr]_. In their experiments,
 they increase the batch size by :math:`44\times` and the model update time
 only takes :math:`1.12\times` longer. That's shown in their Figure 7:
 
-.. image:: assets/goyal-fig7-edits.png
+.. image:: images/goyal-fig7-edits.png
    :width: 60%
    :align: center
 
@@ -87,7 +87,7 @@ decay, etc) are the same for every optimizer.
 
 Our software has reproduced their results:
 
-.. image:: assets/reproduce.png
+.. image:: images/reproduce.png
    :width: 100%
    :align: center
 
@@ -101,7 +101,7 @@ This model has been trained through our software, AdaDamp on NVIDIA T4 GPUs (on
 an Amazon EC2 ``g4dn.xlarge`` instance). When we grow the number of Dask
 workers with the batch size, these results are produced:
 
-.. image:: assets/training_time.png
+.. image:: images/training_time.png
    :width: 50%
    :align: center
 
