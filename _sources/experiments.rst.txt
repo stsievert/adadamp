@@ -74,12 +74,48 @@ only takes :math:`1.12\times` longer. That's shown in their Figure 7:
 Distributed experiments
 -----------------------
 
-*I plan to update this section with the experimental results mentioned
-in my SciPy 2020 proposal.*
+*Some experiments are (briefly) described below. I am in the process of
+finishing the simulations on 2021-03-16.*
+
+We have mirrored the experiments in Section 5.1 of Smith et al. [2]_. In these
+experiments, they present a particular schedule of increasing the batch size
+that reduces the number of model updates. We have taken their model (a
+Wide-ResNet model) and dataset (CIFAR10), and followed the same batch size
+schedule. They run 5 optimizers that only reduce the learning rate or increase
+the batch size. All other hyperparameters for the optimizer (momentum, weight
+decay, etc) are the same for every optimizer.
+
+Our software has reproduced their results:
+
+.. image:: assets/reproduce.png
+   :width: 100%
+   :align: center
+
+The optimizer labeled "Dec. LR" only decreases the learning rate, and the
+optimizer labeled "Inc. BS" only increases the batch size. The optimziers
+labeled "Hybrid (inc-:math:`n`)" increase the batch size :math:`n` times then
+start decaying the learning rate afterwards. The experiment labeled "Hybrid\*2"
+has an initial batch size of 256 (instead of 128).
+
+This model has been trained through our software, AdaDamp on NVIDIA T4 GPUs (on
+an Amazon EC2 ``g4dn.xlarge`` instance). When we grow the number of Dask
+workers with the batch size, these results are produced:
+
+.. image:: assets/training_time.png
+   :width: 50%
+   :align: center
+
+This is a simulation. It sets the training time to be the training time on the
+NVIDIA T4 GPU, and has (very) moderate network bandwidth. We plan to run more
+simulations that improve the network bandwidth.
 
 .. [1] "Improving the convergence of SGD with adaptive batch
    sizes".  Scott Sievert and Zachary Charles. 2019.
    https://arxiv.org/abs/1910.08222
+
+.. [2] "Don't Decay the Learning Rate, Increase the Batch Size". Samuel L.
+       Smith, Pieter-Jan Kindermans, Chris Ying, and Quoc V. Le. 2017.
+       https://arxiv.org/abs/1711.00489
 
 .. [imagenet-1hr] Section 5.5 of "Accurate, Large Minibatch SGD: Training
                   ImageNet in 1 Hour" P. Goyal, P. Dollár, R. Girshick, P.

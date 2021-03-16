@@ -180,7 +180,7 @@ a particular configuration of a distributed system.</p>
 <h2>Synthetic experiments<a class="headerlink" href="#synthetic-experiments" title="Permalink to this headline">¶</a></h2>
 <p><em>To be updated shortly with experimental results that confirm</em> <a class="reference internal" href="math.html#sec-math"><span class="std std-ref">Mathematical underpinnings</span></a>.
 <em>These experiments will be improved versions of the experiments in Section 6.1
-of</em> <a class="footnote-reference brackets" href="#id4" id="id2">1</a>.</p>
+of</em> <a class="footnote-reference brackets" href="#id5" id="id2">1</a>.</p>
 <p>First, let’s illustrate that the proposed batch size method requires far fewer
 model updates. To do this, let’s train a neural network (without any activation
 function) on synthetic data.</p>
@@ -190,22 +190,22 @@ function) on synthetic data.</p>
 does introduce some more complexity into the loss function (mostly
 non-convexity). When we run our adaptive method against other competing
 methods, we get these results:</p>
-<div class="figure align-center" id="id5">
+<div class="figure align-center" id="id7">
 <img alt="_images/synth.svg" src="_images/synth.svg" /><p class="caption"><span class="caption-text">The loss for various optimizers on the neural network above. Lower values
 imply a better model. The test loss of the ERM minimizer is shown with the
-dashed line.</span><a class="headerlink" href="#id5" title="Permalink to this image">¶</a></p>
+dashed line.</span><a class="headerlink" href="#id7" title="Permalink to this image">¶</a></p>
 </div>
-<p>As expected, we find that <code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code> has a minimal number of
+<p>As expected, we find that <a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a> has a minimal number of
 model updates and minimal computation:</p>
 <ul class="simple">
-<li><p><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code> has the number of model updates as gradient descent</p></li>
-<li><p><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code> does no more computation than
-<a class="reference external" href="https://pytorch.org/docs/stable/optim.html#torch.optim.SGD" title="(in PyTorch vmaster (1.7.0a0+57bffc3 ))"><code class="xref py py-class docutils literal notranslate"><span class="pre">SGD</span></code></a></p></li>
+<li><p><a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a> has the number of model updates as gradient descent</p></li>
+<li><p><a class="reference internal" href="api.html#adadamp.AdaDamp" title="adadamp.AdaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">AdaDamp</span></code></a> does no more computation than
+<code class="xref py py-class docutils literal notranslate"><span class="pre">SGD</span></code></p></li>
 </ul>
 <p>Of course, the batch size of AdaDamp is intense to compute. However, there are
 some workarounds to this; the batch size grows closely follows an exponential
 function as if the bounds were tight. This is some of the motivation behind
-<code class="xref py py-class docutils literal notranslate"><span class="pre">PadaDamp</span></code>.</p>
+<a class="reference internal" href="api.html#adadamp.PadaDamp" title="adadamp.PadaDamp"><code class="xref py py-class docutils literal notranslate"><span class="pre">PadaDamp</span></code></a>.</p>
 </div>
 <div class="section" id="distributed-system-setup">
 <h2>Distributed system setup<a class="headerlink" href="#distributed-system-setup" title="Permalink to this headline">¶</a></h2>
@@ -222,13 +222,39 @@ only takes <span class="math notranslate nohighlight">\(1.12\times\)</span> long
 </div>
 <div class="section" id="distributed-experiments">
 <h2>Distributed experiments<a class="headerlink" href="#distributed-experiments" title="Permalink to this headline">¶</a></h2>
-<p><em>I plan to update this section with the experimental results mentioned
-in my SciPy 2020 proposal.</em></p>
+<p><em>Some experiments are (briefly) described below. I am in the process of
+finishing the simulations on 2021-03-16.</em></p>
+<p>We have mirrored the experiments in Section 5.1 of Smith et al. <a class="footnote-reference brackets" href="#id6" id="id4">2</a>. In these
+experiments, they present a particular schedule of increasing the batch size
+that reduces the number of model updates. We have taken their model (a
+Wide-ResNet model) and dataset (CIFAR10), and followed the same batch size
+schedule. They run 5 optimizers that only reduce the learning rate or increase
+the batch size. All other hyperparameters for the optimizer (momentum, weight
+decay, etc) are the same for every optimizer.</p>
+<p>Our software has reproduced their results:</p>
+<a class="reference internal image-reference" href="_images/reproduce.png"><img alt="_images/reproduce.png" class="align-center" src="_images/reproduce.png" style="width: 100%;" /></a>
+<p>The optimizer labeled “Dec. LR” only decreases the learning rate, and the
+optimizer labeled “Inc. BS” only increases the batch size. The optimziers
+labeled “Hybrid (inc-<span class="math notranslate nohighlight">\(n\)</span>)” increase the batch size <span class="math notranslate nohighlight">\(n\)</span> times then
+start decaying the learning rate afterwards. The experiment labeled “Hybrid*2”
+has an initial batch size of 256 (instead of 128).</p>
+<p>This model has been trained through our software, AdaDamp on NVIDIA T4 GPUs (on
+an Amazon EC2 <code class="docutils literal notranslate"><span class="pre">g4dn.xlarge</span></code> instance). When we grow the number of Dask
+workers with the batch size, these results are produced:</p>
+<a class="reference internal image-reference" href="_images/training_time.png"><img alt="_images/training_time.png" class="align-center" src="_images/training_time.png" style="width: 50%;" /></a>
+<p>This is a simulation. It sets the training time to be the training time on the
+NVIDIA T4 GPU, and has (very) moderate network bandwidth. We plan to run more
+simulations that improve the network bandwidth.</p>
 <dl class="footnote brackets">
-<dt class="label" id="id4"><span class="brackets"><a class="fn-backref" href="#id2">1</a></span></dt>
+<dt class="label" id="id5"><span class="brackets"><a class="fn-backref" href="#id2">1</a></span></dt>
 <dd><p>“Improving the convergence of SGD with adaptive batch
 sizes”.  Scott Sievert and Zachary Charles. 2019.
 <a class="reference external" href="https://arxiv.org/abs/1910.08222">https://arxiv.org/abs/1910.08222</a></p>
+</dd>
+<dt class="label" id="id6"><span class="brackets"><a class="fn-backref" href="#id4">2</a></span></dt>
+<dd><p>“Don’t Decay the Learning Rate, Increase the Batch Size”. Samuel L.
+Smith, Pieter-Jan Kindermans, Chris Ying, and Quoc V. Le. 2017.
+<a class="reference external" href="https://arxiv.org/abs/1711.00489">https://arxiv.org/abs/1711.00489</a></p>
 </dd>
 </dl>
 <dl class="citation">

@@ -95,7 +95,6 @@
 <li class="toctree-l2"><a class="reference internal" href="#background">Background</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#why-should-the-batch-size-grow">Why should the batch size grow?</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#how-should-the-batch-size-grow">How should the batch size grow?</a></li>
-<li class="toctree-l2"><a class="reference internal" href="#convergence">Convergence</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="experiments.html">Experiments</a></li>
@@ -225,13 +224,12 @@ can be found in Section 4.1 of Sievert et.  al <a class="footnote-reference brac
 </div>
 <div class="section" id="how-should-the-batch-size-grow">
 <h2>How should the batch size grow?<a class="headerlink" href="#how-should-the-batch-size-grow" title="Permalink to this headline">¶</a></h2>
-<p><cite>To be completed. Detailed in Section 4.2 of</cite> <a class="footnote-reference brackets" href="#id5" id="id3">1</a>.</p>
-</div>
-<div class="section" id="convergence">
-<h2>Convergence<a class="headerlink" href="#convergence" title="Permalink to this headline">¶</a></h2>
-<p><cite>To be completed. Detailed in Section 4.2 of</cite> <a class="footnote-reference brackets" href="#id5" id="id4">1</a>.</p>
+<p>For neural networks, a method that geometrically increases the batch size as a
+function of epochs has shown really good performance. <a class="footnote-reference brackets" href="#id7" id="id3">3</a></p>
+<p>If you have a strongly convex problem, it should grow geometrically with the
+number of model updates (not epochs). <a class="footnote-reference brackets" href="#id8" id="id4">4</a></p>
 <dl class="footnote brackets">
-<dt class="label" id="id5"><span class="brackets">1</span><span class="fn-backref">(<a href="#id2">1</a>,<a href="#id3">2</a>,<a href="#id4">3</a>)</span></dt>
+<dt class="label" id="id5"><span class="brackets"><a class="fn-backref" href="#id2">1</a></span></dt>
 <dd><p>“Improving the convergence of SGD with adaptive batch
 sizes”.  Scott Sievert and Zachary Charles. 2019.
 <a class="reference external" href="https://arxiv.org/abs/1910.08222">https://arxiv.org/abs/1910.08222</a></p>
@@ -240,6 +238,15 @@ sizes”.  Scott Sievert and Zachary Charles. 2019.
 <dd><p>“Gradient Diversity: a Key Ingredient for Scalable Distributed
 Learning”. D Yin, A Pananjady, M Lam, D Papailiopoulos, K Ramchandran, P
 Bartlett. 2018. <a class="reference external" href="https://arxiv.org/abs/1706.05699">https://arxiv.org/abs/1706.05699</a></p>
+</dd>
+<dt class="label" id="id7"><span class="brackets"><a class="fn-backref" href="#id3">3</a></span></dt>
+<dd><p>“Don’t Decay the Learning Rate, Increase the Batch Size”. Samuel L.
+Smith, Pieter-Jan Kindermans, Chris Ying, and Quoc V. Le. 2017.
+<a class="reference external" href="https://arxiv.org/abs/1711.00489">https://arxiv.org/abs/1711.00489</a></p>
+</dd>
+<dt class="label" id="id8"><span class="brackets"><a class="fn-backref" href="#id4">4</a></span></dt>
+<dd><p>Chapter 5 of “Optimization methods for large-scale machine learning.”
+Bottou, Leon and Curtis, Frank E and Nocedal, Jorge. 2018. <a class="reference external" href="https://arxiv.org/abs/1606.04838">https://arxiv.org/abs/1606.04838</a></p>
 </dd>
 </dl>
 </div>
