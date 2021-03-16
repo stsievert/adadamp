@@ -67,7 +67,7 @@ minimization for illustration:
 Then the gradient for model :math:`w_k` for each example will be
 :math:`\color{green}{g_i = y_i - w_k}`.
 
-.. image:: assets/grad-div.svg
+.. image:: images/grad-div.svg
    :align: center
    :alt: Example of how example gradients become more diverse as distance to optimum shrinks
 
