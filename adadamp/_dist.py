@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Union, Tuple, NewType
 from warnings import warn
 from torch.autograd import Variable
 from torch.utils.data import Dataset, IterableDataset, TensorDataset, DataLoader
-from adadamp.damping import BaseDamper, GeoDamp
+from adadamp.adadamp.dampers import SimpleBaseDamper, SimpleGeoDamp
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
 Number = Union[int, float, np.integer, np.float]
@@ -295,6 +295,17 @@ class DaskBaseDamper:
             "partial_fit__calls": 0,
             "n_workers": self.n_workers_,
         }
+            
+        if isinstance(self.batch_size, str):
+            self.batch_size_ = self.get_batch_size(self.batch_size, self.kwargs)
+        elif isinstance(self.batch_size, int):
+            self.batch_size_ = SimpleBaseDamper(self.batch_size)
+        else:
+            self.batch_size_ = self.batch_size
+            
+        if not isinstance(self.batch_size_, SimpleBaseDamper):
+             raise ValueError("BatchSize not subclass of SimpleBaseDamper")    
+        
         self.initialized_ = True
         return self
 
@@ -385,9 +396,9 @@ class DaskBaseDamper:
             args = (X, y) if y is not None else (X,)
             return TensorDataset(*args)
         
-    def get_batch_size(self, batch_size, kwargs: Dict[str, Any]) -> BaseDamper:
+    def get_batch_size(self, batch_size, kwargs: Dict[str, Any]) -> SimpleBaseDamper:
         if batch_size.lower() == "geodamp":
-            Batch = GeoDamp
+            Batch = SimpleGeoDamp
         else:
             raise ValueError(f"batch_size={batch_size} not recognized")
         batch_params = self._get_kwargs_for("batch_size__")
@@ -402,15 +413,6 @@ class DaskBaseDamper:
         start = time()
         if not hasattr(self, "initialized_") or not self.initialized_:
             self.initialize()
-            
-        if isinstance(self.batch_size, str):
-            self.batch_size_ = self.get_batch_size(self.batch_size, self.kwargs)
-        else:
-            self.batch_size_ = self.batch_size
-            
-        if not isinstance(self.batch_size_, BaseDamper):
-             raise ValueError("BatchSize not subclass of BaseDamper")
-            
 
         self.run_single_epoch(X, y=y, **fit_params)
         self._meta["partial_fit__time"] = time() - start
