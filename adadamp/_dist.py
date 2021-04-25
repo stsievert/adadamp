@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Union, Tuple, NewType
 from warnings import warn
 from torch.autograd import Variable
 from torch.utils.data import Dataset, IterableDataset, TensorDataset, DataLoader
-from adadamp.adadamp.dampers import SimpleBaseDamper, SimpleGeoDamp
+from .dampers import BaseDamper, GeoDamp
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
 Number = Union[int, float, np.integer, np.float]
@@ -217,7 +217,7 @@ class DaskBaseDamper:
         self.worker_max_batch_size = worker_max_batch_size
         self.min_workers = min_workers
         self.max_workers = max_workers
-        self.n_workers_ = min_workers
+        self.min_workers = min_workers
         self.random_state = random_state
         self.kwargs = kwargs
 
@@ -288,23 +288,28 @@ class DaskBaseDamper:
         self.optimizer_ = self.optimizer(self.module_.parameters(), **opt_kwargs)
         self.loss_ = self.loss(reduction="sum", **loss_kwargs)
         self.damping_ = self.batch_size
+        self.n_workers_ = self.min_workers
         self._meta: Dict[str, Number] = {
             "n_updates": 0,
             "n_data": 0,
             "score__calls": 0,
             "partial_fit__calls": 0,
             "n_workers": self.n_workers_,
+            "num_examples": 0
         }
             
+        if not isinstance(self.batch_size, (str, int, np.integer, BaseDamper)):
+            raise ValueError("self.batch_size needs to be instance of int, str or BaseDamper")
+            
         if isinstance(self.batch_size, str):
-            self.batch_size_ = self.get_batch_size(self.batch_size, self.kwargs)
-        elif isinstance(self.batch_size, int):
-            self.batch_size_ = SimpleBaseDamper(self.batch_size)
+            self.batch_size_ = self._get_damper(self.batch_size, self.kwargs)
+        elif isinstance(self.batch_size, (int, np.integer)):
+            self.batch_size_ = BaseDamper(self.batch_size)
         else:
             self.batch_size_ = self.batch_size
             
-        if not isinstance(self.batch_size_, SimpleBaseDamper):
-             raise ValueError("BatchSize not subclass of SimpleBaseDamper")    
+        if not isinstance(self.batch_size_, BaseDamper):
+             raise ValueError("BatchSize not subclass of BaseDamper")    
         
         self.initialized_ = True
         return self
@@ -344,7 +349,13 @@ class DaskBaseDamper:
         n_data : int
             The number of data processed.
         """
-        damping = self.batch_size_.damping();
+        print(self._meta)
+        
+        _epochs = self._meta["num_examples"] / self._meta["len_dataset"]
+        self._meta["_epochs"] = int(_epochs);
+        
+        damping = self.batch_size_.damping(self._meta);
+        
         lr = self._get_lr()
         bs = damping
         if self.max_batch_size and self.lr and bs > self.max_batch_size:
@@ -396,9 +407,9 @@ class DaskBaseDamper:
             args = (X, y) if y is not None else (X,)
             return TensorDataset(*args)
         
-    def get_batch_size(self, batch_size, kwargs: Dict[str, Any]) -> SimpleBaseDamper:
+    def _get_damper(self, batch_size, kwargs: Dict[str, Any]) -> BaseDamper:
         if batch_size.lower() == "geodamp":
-            Batch = SimpleGeoDamp
+            Batch = GeoDamp
         else:
             raise ValueError(f"batch_size={batch_size} not recognized")
         batch_params = self._get_kwargs_for("batch_size__")
@@ -414,12 +425,14 @@ class DaskBaseDamper:
         if not hasattr(self, "initialized_") or not self.initialized_:
             self.initialize()
 
-        self.run_single_epoch(X, y=y, **fit_params)
+        self._run_single_epoch(X, y=y, **fit_params)
         self._meta["partial_fit__time"] = time() - start
         self._meta["partial_fit__calls"] += 1
+        self._meta["num_examples"] += len(X)
+        
         return self
 
-    def run_single_epoch(self, X, y=None, **fit_params):
+    def _run_single_epoch(self, X, y=None, **fit_params):
         """
         Train a single epoch.
 
@@ -452,6 +465,7 @@ class DaskBaseDamper:
 
         # Run BS items through until hitting every element in dataset
         while True:
+            self._meta["len_dataset"] = len_dataset
             model_opt, bs = self.train_step(
                 model_opt,
                 dataset,
