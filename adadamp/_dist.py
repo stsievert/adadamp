@@ -349,7 +349,6 @@ class DaskBaseDamper:
         n_data : int
             The number of data processed.
         """
-        print(self._meta)
         
         _epochs = self._meta["num_examples"] / self._meta["len_dataset"]
         self._meta["_epochs"] = int(_epochs);
