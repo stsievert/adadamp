@@ -22,4 +22,5 @@ __all__ = [
     "GeoDampLR",
     "CntsDampLR",
     "GradientDescent",
+    "RadaDamp",
 ]
