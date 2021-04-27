@@ -65,7 +65,7 @@ class BaseDamper:
         max_batch_size: Optional[int] = None,
         best_train_loss: Optional[float] = None,
         random_state: Optional[int] = None,
-        dwell: int=20,
+        dwell: int = 20,
         **kwargs,
     ):
         # Public
@@ -119,7 +119,6 @@ class BaseDamper:
         else:
             damping = self._meta["damping"]
 
-
         # Is the batch size too large? If so, decay the learning rate
         current_bs = self._batch_size
         max_bs = self.max_batch_size
@@ -142,6 +141,11 @@ class BaseDamper:
         self._meta["num_examples"] += num_examples
         self._meta["batch_loss"] = batch_loss
         self._meta["batch_size"] = self._batch_size
+        extras = self._step_callback(self._model)
+        self._meta.update(extras)
+
+    def _step_callback(self, model):
+        return {}
 
     def damping(self) -> int:
         """Determines how strongly noise in stochastic gradient
@@ -263,12 +267,80 @@ class BaseDamper:
                 output = self._model(data)
                 loss = self._loss(output, target, reduction="sum")
                 total_loss += loss.item()
+
                 if frac is not None and _num_eg >= num_eg:
                     break
         if frac is None:
             assert _num_eg == len(dataset)
         assert type(total_loss) == float
         return total_loss / _num_eg
+
+    def _get_grads(self, frac=None) -> List[np.ndarray]:
+        dataset = self._dataset
+        kwargs = (
+            {"num_workers": 0, "pin_memory": True} if torch.cuda.is_available() else {}
+        )
+        loader = torch.utils.data.DataLoader(
+            dataset, batch_size=1000, shuffle=True, **kwargs
+        )
+        num_eg = len(dataset)
+        if frac is not None:
+            num_eg = int(frac * len(dataset))
+
+        total_loss = 0
+        _num_eg = 0
+        for data, target in loader:
+            data, target = data.to(self._device), target.to(self._device)
+            _num_eg += len(data)
+            output = self._model(data)
+            loss = self._loss(output, target, reduction="sum")
+            loss.backward()
+
+            if frac is not None and _num_eg >= num_eg:
+                break
+        return [p.grad.detach().numpy() for p in self._model.parameters()]
+
+
+class RadaDamp(BaseDamper):
+    def __init__(self, *args, rho=0.9, fn_class="smooth", **kwargs):
+        self.rho = rho
+        self.fn_class = fn_class
+        super().__init__(*args, **kwargs)
+        self._meta["damper"] = "padadamp2"
+
+    def _step_callback(self, model):
+        if self.fn_class != "smooth":
+            return {}
+
+        with torch.no_grad():
+            norm2 = 0.0
+            for p in model.parameters():
+                x = torch.norm(p.grad).item()
+                assert isinstance(x, (float, np.floating))
+                norm2 += float(x)
+        return {"_batch_grad_norm2": norm2}
+
+    def step(self, *args, **kwargs):
+        if self._meta["model_updates"] == 0:
+            if self.fn_class == "smooth":
+                grads = self._get_grads()
+                norm2 = sum(np.linalg.norm(g) ** 2 for g in grads)
+                self._meta["_moving_avg"] = self._meta["_batch_grad_norm2"] = norm2
+            else:
+                loss = self._get_loss(frac=0.01)
+                self._meta["_moving_avg"] = loss
+        return super().step(*args, **kwargs)
+
+    def damping(self) -> int:
+        if self._meta["model_updates"] == 0:
+            self._meta["_initial_factor"] = copy(self._meta["_moving_avg"])
+        key = "_batch_grad_norm2" if self.fn_class == "smooth" else "batch_loss"
+        current = copy(self._meta[key])
+        past = copy(self._meta["_moving_avg"])
+        self._meta["_moving_avg"] = (1 - self.rho) * current + (self.rho * past)
+        factor = self._meta["_initial_factor"] / self._meta["_moving_avg"]
+        print(self.initial_batch_size * factor, self._meta["_moving_avg"])
+        return int(self.initial_batch_size * factor)
 
 
 class AdaDamp(BaseDamper):

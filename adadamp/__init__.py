@@ -3,6 +3,7 @@ __version__ = "0.1.11"
 from .damping import (
     BaseDamper,
     AdaDamp,
+    RadaDamp,
     PadaDamp,
     GeoDamp,
     GeoDampLR,
