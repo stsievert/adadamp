@@ -302,10 +302,10 @@ class BaseDamper:
 
 
 class RadaDamp(BaseDamper):
-    def __init__(self, *args, rho=0.9, fn_class="smooth", **kwargs):
+    def __init__(self, *args, rho=0.9, dwell=1, fn_class="smooth", **kwargs):
         self.rho = rho
         self.fn_class = fn_class
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, dwell=dwell, **kwargs)
         self._meta["damper"] = "padadamp2"
 
     def _step_callback(self, model):
@@ -339,7 +339,6 @@ class RadaDamp(BaseDamper):
         past = copy(self._meta["_moving_avg"])
         self._meta["_moving_avg"] = (1 - self.rho) * current + (self.rho * past)
         factor = self._meta["_initial_factor"] / self._meta["_moving_avg"]
-        print(self.initial_batch_size * factor, self._meta["_moving_avg"])
         return int(self.initial_batch_size * factor)
 
 

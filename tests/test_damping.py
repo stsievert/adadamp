@@ -369,7 +369,7 @@ def test_adadamp2(model, medium_dataset):
     ibs = 100
     mbs = 200
     dataset = medium_dataset
-    opt = AdaDamp2(model, dataset, _opt, initial_batch_size=ibs, max_batch_size=mbs)
+    opt = RadaDamp(model, dataset, _opt, initial_batch_size=ibs, max_batch_size=mbs)
     data = []
     for epoch in range(1, 16 + 1):
         model, opt, meta, train_data = experiment.train(model, opt)
