@@ -41,7 +41,7 @@ def _set_random_state(seed: int, device="cuda") -> bool:
     """
     Sets random state based on a seed
     """
-    
+
     np.random.seed(seed)
     torch.manual_seed(seed)
     random.seed(seed)
@@ -295,22 +295,21 @@ class DaskBaseDamper:
             "score__calls": 0,
             "partial_fit__calls": 0,
             "n_workers": self.n_workers_,
-            "num_examples": 0
+            "num_examples": 0,
         }
-            
-        if not isinstance(self.batch_size, (str, int, np.integer, BaseDamper)):
-            raise ValueError("self.batch_size needs to be instance of int, str or BaseDamper")
-            
-        if isinstance(self.batch_size, str):
+
+        if isinstance(self.batch_size, (str, type)):
             self.batch_size_ = self._get_damper(self.batch_size, self.kwargs)
         elif isinstance(self.batch_size, (int, np.integer)):
             self.batch_size_ = BaseDamper(self.batch_size)
         else:
             self.batch_size_ = self.batch_size
-            
+
         if not isinstance(self.batch_size_, BaseDamper):
-             raise ValueError("BatchSize not subclass of BaseDamper")    
-        
+            raise ValueError(
+                f"self.batch_size_={self.batch_size_} is not an instance of adadamp.dampers.BaseDamper"
+            )
+
         self.initialized_ = True
         return self
 
@@ -349,12 +348,12 @@ class DaskBaseDamper:
         n_data : int
             The number of data processed.
         """
-        
+
         _epochs = self._meta["num_examples"] / self._meta["len_dataset"]
-        self._meta["_epochs"] = int(_epochs);
-        
-        damping = self.batch_size_.damping(self._meta);
-        
+        self._meta["_epochs"] = int(_epochs)
+
+        damping = self.batch_size_.damping(self._meta)
+
         lr = self._get_lr()
         bs = damping
         if self.max_batch_size and self.lr and bs > self.max_batch_size:
@@ -405,12 +404,17 @@ class DaskBaseDamper:
 
             args = (X, y) if y is not None else (X,)
             return TensorDataset(*args)
-        
-    def _get_damper(self, batch_size, kwargs: Dict[str, Any]) -> BaseDamper:
-        if batch_size.lower() == "geodamp":
-            Batch = GeoDamp
+
+    def _get_damper(
+        self, batch_size: Union[str, type], kwargs: Dict[str, Any]
+    ) -> BaseDamper:
+        if isinstance(batch_size, str):
+            if batch_size.lower() == "geodamp":
+                Batch = GeoDamp
+            else:
+                raise ValueError(f"batch_size={batch_size} not recognized")
         else:
-            raise ValueError(f"batch_size={batch_size} not recognized")
+            Batch = batch_size
         batch_params = self._get_kwargs_for("batch_size__")
         return Batch(**batch_params)
 
@@ -428,7 +432,7 @@ class DaskBaseDamper:
         self._meta["partial_fit__time"] = time() - start
         self._meta["partial_fit__calls"] += 1
         self._meta["num_examples"] += len(X)
-        
+
         return self
 
     def _run_single_epoch(self, X, y=None, **fit_params):
@@ -641,3 +645,42 @@ class DaskClassifier(DaskBaseDamper):
         return acc
 
 
+class DaskRegressor(DaskBaseDamper):
+    def __init__(self, *args, loss=nn.MSELoss, **kwargs):
+        return super().__init__(*args, loss=loss, **kwargs)
+
+    def score(self, X, y=None):
+        if not hasattr(self, "initialized_") or not self.initialized_:
+            self.initialize()
+
+        if len(X) == 0:
+            raise ValueError("Pass some data to `score`")
+
+        if isinstance(X, torch.utils.data.Dataset):
+            dataset = X
+            loader = torch.utils.data.DataLoader(dataset, batch_size=1000)
+        elif isinstance(X, torch.utils.data.DataLoader):
+            loader = X
+        else:
+            dataset = self._get_dataset(X, y=y)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=1000)
+
+        _num_examples = 0
+        _sum_of_errors = torch.tensor(0.0, device=self.device)
+        _y_sq_sum = torch.tensor(0.0, device=self.device)
+        _y_sum = torch.tensor(0.0, device=self.device)
+
+        with torch.no_grad():
+            for X, y in loader:
+                X, y = X.to(self.device), y.to(self.device)
+                y_pred = self.module_.forward(X)
+
+                # from https://pytorch.org/ignite/_modules/ignite/contrib/metrics/regression/r2_score.html
+                _num_examples += y.shape[0]
+                _y_sum += torch.sum(y).to(self.device)
+                _sum_of_errors += torch.sum(torch.pow(y_pred - y, 2)).to(self.device)
+                _y_sq_sum += torch.sum(torch.pow(y, 2)).to(self.device)
+
+        return 1 - _sum_of_errors.item() / (
+            _y_sq_sum.item() - (_y_sum.item() ** 2) / _num_examples
+        )

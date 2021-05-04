@@ -14,7 +14,9 @@ from distributed.utils_test import gen_cluster
 from sklearn.utils import check_random_state
 
 from test_sklearn_interface import Net, X, y
-from adadamp import DaskBaseDamper, DaskClassifier
+from adadamp import DaskBaseDamper, DaskClassifier, DaskRegressor
+from adadamp.dampers import GeoDamp
+from sklearn.datasets import make_regression
 
 
 class LinearNet(nn.Module):
@@ -140,8 +142,38 @@ def test_max_batch_size():
         assert np.allclose(noise_level, 256 * i)
 
 
+class HiddenLayer(nn.Module):
+    def __init__(self, features=4, hidden=2, out=1):
+        super().__init__()
+        self.hidden = nn.Linear(features, hidden)
+        self.out = nn.Linear(hidden, out)
+
+    def forward(self, x, *args, **kwargs):
+        ir = F.relu(self.hidden(x))
+        return self.out(ir)
+
+
+def test_geodamp():
+    est = DaskRegressor(
+        module=HiddenLayer,
+        module__features=10,
+        optimizer=optim.Adadelta,
+        optimizer__weight_decay=1e-7,
+        max_epochs=10,
+    )
+    est.set_params(batch_size=GeoDamp, batch_size__delay=60, batch_size__factor=5)
+    X, y = make_regression(n_features=10)
+    X = torch.from_numpy(X.astype("float32"))
+    y = torch.from_numpy(y.astype("float32")).reshape(-1, 1)
+    est.fit(X, y)
+    score = est.score(X, y)
+    assert -1 < score
+
+
+
 if __name__ == "__main__":
     client = Client()
     client.run(_prep)
+    test_geodamp()
     test_dask_damper_updates()
     test_max_batch_size()

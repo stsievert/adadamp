@@ -1,9 +1,10 @@
-class BaseDamper:    
+class BaseDamper:
     def __init__(self, initial=128):
         self.initial = initial
-        
+
     def damping(self, meta):
         return self.initial
+
 
 class GeoDamp(BaseDamper):
     def __init__(self, initial=128, dwell=5, factor=5):
@@ -12,4 +13,5 @@ class GeoDamp(BaseDamper):
         self.factor = 5
 
     def damping(self, meta):
-        return self.initial * (self.factor ** meta["_epochs"] // self.dwell) # I think
+        bs = self.initial * (self.factor ** (meta["_epochs"] // self.dwell))
+        return bs
