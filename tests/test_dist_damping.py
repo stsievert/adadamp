@@ -176,5 +176,5 @@ if __name__ == "__main__":
     client = Client()
     client.run(_prep)
     test_geodamp()
-    #  test_dask_damper_updates()
+    test_dask_damper_updates()
     test_max_batch_size()
