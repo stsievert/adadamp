@@ -15,7 +15,7 @@ from sklearn.utils import check_random_state
 
 from test_sklearn_interface import Net, X, y
 from adadamp import DaskBaseDamper, DaskClassifier, DaskRegressor
-from adadamp.dampers import GeoDamp
+import adadamp.dampers as dampers
 from sklearn.datasets import make_regression
 
 
@@ -126,20 +126,21 @@ def test_max_batch_size():
         module__d=d,
         loss=nn.MSELoss,
         max_batch_size=mbs,
-        batch_size=bs,
         optimizer=optim.Adadelta,
         lr=lr,
+        batch_size=dampers.PadaDamp(rate=1, initial=bs),
     )
     for i in range(1, 8):
-        d = est.batch_size * i
-        est.damping_ = d
+        print(i)
         est.partial_fit(X, y)
-        assert est.meta_["batch_size_"] == min(mbs, bs * i)
+        bs_ = est.meta_["damping_"]
+        assert (bs_ - bs) == est.meta_["n_updates"] - 1
+        assert est.meta_["batch_size_"] == min(mbs, bs_)
         factor = est.meta_["batch_size_"] / est.meta_["damping_"]
         assert est.meta_["lr_"] == factor * lr
 
         noise_level = est.meta_["batch_size_"] / est.meta_["lr_"]
-        assert np.allclose(noise_level, 256 * i)
+        assert np.allclose(noise_level, est.meta_["damping_"])
 
 
 class HiddenLayer(nn.Module):
@@ -161,7 +162,7 @@ def test_geodamp():
         optimizer__weight_decay=1e-7,
         max_epochs=10,
     )
-    est.set_params(batch_size=GeoDamp, batch_size__delay=60, batch_size__factor=5)
+    est.set_params(batch_size=dampers.GeoDamp, batch_size__delay=60, batch_size__factor=5)
     X, y = make_regression(n_features=10)
     X = torch.from_numpy(X.astype("float32"))
     y = torch.from_numpy(y.astype("float32")).reshape(-1, 1)
@@ -175,5 +176,5 @@ if __name__ == "__main__":
     client = Client()
     client.run(_prep)
     test_geodamp()
-    test_dask_damper_updates()
+    #  test_dask_damper_updates()
     test_max_batch_size()
