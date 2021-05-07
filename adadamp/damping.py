@@ -1,6 +1,6 @@
 from typing import Callable, Dict, Any, Tuple, Set, List, Optional, Union
 from pprint import pprint
-from copy import copy
+from copy import copy, deepcopy
 import itertools
 from time import time
 
@@ -112,21 +112,17 @@ class BaseDamper:
         start = time()
         updates = self._meta["model_updates"]
 
-        if (updates % self.dwell == 0) or updates <= 2 * self.dwell:
-            damping = self.damping()
-            self._meta["damping_time"] = time() - start
-            self._batch_size = int(damping)
-        else:
-            damping = self._meta["damping"]
+        damping = self.damping() if updates % self.dwell == 0 else self._meta["damping"]
+        self._meta["damping"] = damping
 
         # Is the batch size too large? If so, decay the learning rate
-        current_bs = self._batch_size
+        batch_size = deepcopy(damping)
         max_bs = self.max_batch_size
-        if max_bs is not None and current_bs >= max_bs:
-            self._set_lr(self._initial_lr * max_bs / current_bs)
-            self._batch_size = max_bs
+        if max_bs is not None and batch_size >= max_bs:
+            self._set_lr(self._initial_lr * max_bs / batch_size)
+            batch_size = max_bs
 
-        batch_loss, num_examples = self._step(**kwargs)
+        batch_loss, num_examples = self._step(batch_size, **kwargs)
         epochs = self._meta["num_examples"] / self._meta["len_dataset"]
         if (batch_loss >= 1e6 or np.isnan(batch_loss)) and epochs > 1:
             raise ConvergenceError(
@@ -136,11 +132,10 @@ class BaseDamper:
         self._meta["model_updates"] += 1
         self._meta["time"] = time()
         self._meta["step_time"] = time() - start
-        self._meta["damping"] = damping
         self._meta["lr_"] = self._get_lr()
         self._meta["num_examples"] += num_examples
         self._meta["batch_loss"] = batch_loss
-        self._meta["batch_size"] = self._batch_size
+        self._meta["batch_size_"] = batch_size
         extras = self._step_callback(self._model)
         self._meta.update(extras)
 
@@ -179,11 +174,11 @@ class BaseDamper:
         target = [d[1] for d in data_target]
         return torch.cat(data), torch.tensor(target)
 
-    def _step(self, **kwargs):
+    def _step(self, batch_size, **kwargs):
+        bs = batch_size
         start = time()
 
-        bs = self._batch_size
-        data, target = self._get_batch(batch_size=bs)
+        data, target = self._get_batch(batch_size=batch_size)
         self._sizes = {"data": data.size(), "target": target.size()}
 
         self._opt.zero_grad()
@@ -306,7 +301,7 @@ class RadaDamp(BaseDamper):
         self.rho = rho
         self.fn_class = fn_class
         super().__init__(*args, dwell=dwell, **kwargs)
-        self._meta["damper"] = "padadamp2"
+        self._meta["damper"] = "radadamp"
 
     def _step_callback(self, model):
         if self.fn_class != "smooth":
