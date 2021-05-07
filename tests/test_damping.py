@@ -357,19 +357,20 @@ def test_lr_decays(model, dataset):
 @pytest.fixture
 def medium_dataset():
     X, y = make_classification(
-        n_features=20, n_samples=1000, n_classes=10, n_informative=10
+        n_features=20, n_samples=2000, n_classes=10, n_informative=10
     )
     return TensorDataset(
         torch.from_numpy(X.astype("float32")), torch.from_numpy(y.astype("int64"))
     )
 
 
-def test_adadamp2(model, medium_dataset):
-    _opt = optim.SGD(model.parameters(), lr=0.01)
-    ibs = 100
-    mbs = 200
-    dataset = medium_dataset
-    opt = RadaDamp(model, dataset, _opt, initial_batch_size=ibs, max_batch_size=mbs)
+def test_radadamp(model, medium_dataset):
+    _opt = optim.Adadelta(model.parameters())
+    ibs = 10
+    mbs = 1000
+    opt = RadaDamp(
+        model, medium_dataset, _opt, initial_batch_size=ibs, max_batch_size=mbs
+    )
     data = []
     for epoch in range(1, 16 + 1):
         model, opt, meta, train_data = experiment.train(model, opt)

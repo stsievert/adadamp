@@ -312,7 +312,7 @@ class RadaDamp(BaseDamper):
             for p in model.parameters():
                 x = torch.norm(p.grad).item()
                 assert isinstance(x, (float, np.floating))
-                norm2 += float(x)
+                norm2 += float(x)**2
         return {"_batch_grad_norm2": norm2}
 
     def step(self, *args, **kwargs):
@@ -320,9 +320,10 @@ class RadaDamp(BaseDamper):
             if self.fn_class == "smooth":
                 grads = self._get_grads()
                 norm2 = sum(np.linalg.norm(g) ** 2 for g in grads)
-                self._meta["_moving_avg"] = self._meta["_batch_grad_norm2"] = norm2
+                self._meta["_moving_avg"] = copy(norm2)
+                self._meta["_batch_grad_norm2"] = copy(norm2)
             else:
-                loss = self._get_loss(frac=0.01)
+                loss = self._get_loss(frac=0.1)
                 self._meta["_moving_avg"] = loss
         return super().step(*args, **kwargs)
 
