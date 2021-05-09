@@ -1,5 +1,4 @@
 from typing import Callable, Dict, Any, Tuple, Set, List, Optional, Union
-from pprint import pprint
 from copy import copy, deepcopy
 import itertools
 from time import time
@@ -351,14 +350,11 @@ class RadaDamp(BaseDamper):
             )
             return self.initial_batch_size
         elif self._meta["model_updates"] == limit:
-            from pprint import pprint
-            pprint(self._meta)
             self._meta["_grad_mavg"] /= self._meta["model_updates"]
             self._meta["_loss_mavg"] /= self._meta["model_updates"]
             self._meta["_initial_factor"] = (
                 5 * self._meta["_loss_mavg"] + self._meta["_grad_mavg"]
             )
-            pprint(self._meta)
 
         self._meta["_loss_mavg"] = self._rolling_avg(
             self._meta["batch_loss"], self._meta["_loss_mavg"], self.rho
@@ -372,7 +368,6 @@ class RadaDamp(BaseDamper):
         _factor = self._meta["_initial_factor"] / div
         factor = max(1, _factor)
         damping = int(self.initial_batch_size * factor)
-        print(damping)
         return damping
 
 

@@ -46,7 +46,7 @@ def run(
         data.append(
             {"epoch_time": time(), **args, **opt.meta, **_train_stats, **test_stats}
         )
-        if True:
+        if verbose:
             _s = {
                 k: v
                 for k, v in data[-1].items()
