@@ -168,7 +168,7 @@ class BaseDamper:
         return self._rng.choice(len(self._dataset), size=batch_size)
 
     def _get_batch(self, batch_size=None):
-        idx = self._get_example_indices()
+        idx = self._get_example_indices(batch_size=batch_size)
         data_target = [self._dataset[i] for i in idx]
         data = [d[0].reshape(-1, *d[0].size()) for d in data_target]
         target = [d[1] for d in data_target]
@@ -297,7 +297,7 @@ class BaseDamper:
 
 
 class RadaDamp(BaseDamper):
-    def __init__(self, *args, rho=0.9, dwell=1, fn_class="smooth", **kwargs):
+    def __init__(self, *args, rho=0.999, dwell=1, fn_class="smooth", **kwargs):
         self.rho = rho
         self.fn_class = fn_class
         super().__init__(*args, dwell=dwell, **kwargs)
@@ -312,30 +312,68 @@ class RadaDamp(BaseDamper):
             for p in model.parameters():
                 x = torch.norm(p.grad).item()
                 assert isinstance(x, (float, np.floating))
-                norm2 += float(x)**2
-        return {"_batch_grad_norm2": norm2}
+                norm2 += float(x) ** 2
+
+        return {"_batch_grad_norm2": norm2, "_batch_grad_norm": np.sqrt(norm2)}
 
     def step(self, *args, **kwargs):
         if self._meta["model_updates"] == 0:
-            if self.fn_class == "smooth":
-                grads = self._get_grads()
-                norm2 = sum(np.linalg.norm(g) ** 2 for g in grads)
-                self._meta["_moving_avg"] = copy(norm2)
-                self._meta["_batch_grad_norm2"] = copy(norm2)
-            else:
-                loss = self._get_loss(frac=0.1)
-                self._meta["_moving_avg"] = loss
+            grads = self._get_grads()
+            norm2 = sum(np.linalg.norm(g) ** 2 for g in grads)
+            norm = np.sqrt(norm2)
+            self._meta["_initial_norm2"] = copy(norm2)
+            self._meta["_batch_grad_norm2"] = copy(norm2)
+            self._meta["_batch_grad_norm"] = copy(norm)
+
+            loss = self._get_loss(frac=0.01)
+            self._meta["_initial_loss"] = loss
+
         return super().step(*args, **kwargs)
 
+    @staticmethod
+    def _rolling_avg(current, past, rho):
+        return (1 - rho) * current + (rho * past)
+
     def damping(self) -> int:
+        _grad_key = "_batch_grad_norm2"
+
+        limit = 50
         if self._meta["model_updates"] == 0:
-            self._meta["_initial_factor"] = copy(self._meta["_moving_avg"])
-        key = "_batch_grad_norm2" if self.fn_class == "smooth" else "batch_loss"
-        current = copy(self._meta[key])
-        past = copy(self._meta["_moving_avg"])
-        self._meta["_moving_avg"] = (1 - self.rho) * current + (self.rho * past)
-        factor = self._meta["_initial_factor"] / self._meta["_moving_avg"]
-        return int(self.initial_batch_size * factor)
+            self._meta["_grad_mavg"] = 0.0
+            self._meta["_loss_mavg"] = 0.0
+            return self.initial_batch_size
+        elif self._meta["model_updates"] < limit:
+            # avoid initial large gradients
+            self._meta["_grad_mavg"] += copy(self._meta[_grad_key])
+
+            self._meta["_loss_mavg"] += copy(
+                self._meta["batch_loss"] or self._meta["_initial_loss"]
+            )
+            return self.initial_batch_size
+        elif self._meta["model_updates"] == limit:
+            from pprint import pprint
+            pprint(self._meta)
+            self._meta["_grad_mavg"] /= self._meta["model_updates"]
+            self._meta["_loss_mavg"] /= self._meta["model_updates"]
+            self._meta["_initial_factor"] = (
+                5 * self._meta["_loss_mavg"] + self._meta["_grad_mavg"]
+            )
+            pprint(self._meta)
+
+        self._meta["_loss_mavg"] = self._rolling_avg(
+            self._meta["batch_loss"], self._meta["_loss_mavg"], self.rho
+        )
+        self._meta["_grad_mavg"] = self._rolling_avg(
+            self._meta[_grad_key], self._meta["_grad_mavg"], self.rho
+        )
+
+        div = 5 * self._meta["_loss_mavg"] + self._meta["_grad_mavg"]
+
+        _factor = self._meta["_initial_factor"] / div
+        factor = max(1, _factor)
+        damping = int(self.initial_batch_size * factor)
+        print(damping)
+        return damping
 
 
 class AdaDamp(BaseDamper):
