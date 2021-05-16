@@ -164,7 +164,10 @@ class BaseDamper:
     def _get_example_indices(self, batch_size=None):
         if batch_size is None:
             batch_size = self._batch_size
-        return self._rng.choice(len(self._dataset), size=batch_size)
+        if np.is_nan(batch_size):
+            batch_size = np.inf
+        batch_size = min(batch_size, len(self._dataset))
+        return self._rng.choice(len(self._dataset), size=int(batch_size), replace=False)
 
     def _get_batch(self, batch_size=None):
         idx = self._get_example_indices(batch_size=batch_size)
@@ -316,6 +319,8 @@ class RadaDamp(BaseDamper):
         return {"_batch_grad_norm2": norm2, "_batch_grad_norm": np.sqrt(norm2)}
 
     def step(self, *args, **kwargs):
+        limit = 50
+        _grad_key = "_batch_grad_norm2"
         if self._meta["model_updates"] == 0:
             grads = self._get_grads()
             norm2 = sum(np.linalg.norm(g) ** 2 for g in grads)
@@ -327,6 +332,22 @@ class RadaDamp(BaseDamper):
             loss = self._get_loss(frac=0.01)
             self._meta["_initial_loss"] = loss
 
+            self._meta["_grad_mavg"] = 0.0
+            self._meta["_loss_mavg"] = 0.0
+
+        elif self._meta["model_updates"] < limit:
+            # avoid initial large gradients
+            self._meta["_grad_mavg"] += copy(self._meta[_grad_key])
+
+            self._meta["_loss_mavg"] += copy(
+                self._meta["batch_loss"] or self._meta["_initial_loss"]
+            )
+        elif self._meta["model_updates"] == limit:
+            self._meta["_grad_mavg"] /= self._meta["model_updates"]
+            self._meta["_loss_mavg"] /= self._meta["model_updates"]
+            self._meta["_initial_factor"] = (
+                5 * self._meta["_loss_mavg"] + self._meta["_grad_mavg"]
+            )
         return super().step(*args, **kwargs)
 
     @staticmethod
@@ -335,27 +356,6 @@ class RadaDamp(BaseDamper):
 
     def damping(self) -> int:
         _grad_key = "_batch_grad_norm2"
-
-        limit = 50
-        if self._meta["model_updates"] == 0:
-            self._meta["_grad_mavg"] = 0.0
-            self._meta["_loss_mavg"] = 0.0
-            return self.initial_batch_size
-        elif self._meta["model_updates"] < limit:
-            # avoid initial large gradients
-            self._meta["_grad_mavg"] += copy(self._meta[_grad_key])
-
-            self._meta["_loss_mavg"] += copy(
-                self._meta["batch_loss"] or self._meta["_initial_loss"]
-            )
-            return self.initial_batch_size
-        elif self._meta["model_updates"] == limit:
-            self._meta["_grad_mavg"] /= self._meta["model_updates"]
-            self._meta["_loss_mavg"] /= self._meta["model_updates"]
-            self._meta["_initial_factor"] = (
-                5 * self._meta["_loss_mavg"] + self._meta["_grad_mavg"]
-            )
-
         self._meta["_loss_mavg"] = self._rolling_avg(
             self._meta["batch_loss"], self._meta["_loss_mavg"], self.rho
         )
