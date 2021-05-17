@@ -164,7 +164,7 @@ class BaseDamper:
     def _get_example_indices(self, batch_size=None):
         if batch_size is None:
             batch_size = self._batch_size
-        if np.is_nan(batch_size):
+        if np.isnan(batch_size):
             batch_size = np.inf
         batch_size = min(batch_size, len(self._dataset))
         return self._rng.choice(len(self._dataset), size=int(batch_size), replace=False)
@@ -355,6 +355,9 @@ class RadaDamp(BaseDamper):
         return (1 - rho) * current + (rho * past)
 
     def damping(self) -> int:
+        limit = 50
+        if self._meta["model_updates"] <= limit:
+            return self.initial_batch_size
         _grad_key = "_batch_grad_norm2"
         self._meta["_loss_mavg"] = self._rolling_avg(
             self._meta["batch_loss"], self._meta["_loss_mavg"], self.rho
