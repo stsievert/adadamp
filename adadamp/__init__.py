@@ -1,4 +1,4 @@
-__version__ = "0.2.0rc4"
+__version__ = "0.2.0rc5"
 
 from .damping import (
     BaseDamper,

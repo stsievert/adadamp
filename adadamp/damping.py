@@ -346,7 +346,7 @@ class RadaDamp(BaseDamper):
             self._meta["_grad_mavg"] /= self._meta["model_updates"]
             self._meta["_loss_mavg"] /= self._meta["model_updates"]
             self._meta["_initial_factor"] = (
-                5 * self._meta["_loss_mavg"] + self._meta["_grad_mavg"]
+                0 * self._meta["_loss_mavg"] + self._meta["_grad_mavg"]
             )
         return super().step(*args, **kwargs)
 
@@ -366,7 +366,7 @@ class RadaDamp(BaseDamper):
             self._meta[_grad_key], self._meta["_grad_mavg"], self.rho
         )
 
-        div = 5 * self._meta["_loss_mavg"] + self._meta["_grad_mavg"]
+        div = 0 * self._meta["_loss_mavg"] + self._meta["_grad_mavg"]
 
         _factor = self._meta["_initial_factor"] / div
         factor = max(1, _factor)
