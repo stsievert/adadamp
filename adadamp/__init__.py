@@ -1,24 +1,9 @@
-__version__ = "0.1.11"
+__version__ = "0.2.0"
 
-from .damping import (
-    BaseDamper,
-    AdaDamp,
-    PadaDamp,
-    GeoDamp,
-    GeoDampLR,
-    CntsDampLR,
-    GradientDescent,
-    ConvergenceError,
-)
-from ._dist import DaskBaseDamper, DaskClassifier
-from .utils import _get_resnet18
+from ._dist import DaskBaseDamper, DaskClassifier, DaskRegressor
 
 __all__ = [
     "BaseDamper",
-    "AdaDamp",
-    "PadaDamp",
-    "GeoDamp",
-    "GeoDampLR",
-    "CntsDampLR",
-    "GradientDescent",
+    "DaskClassifier",
+    "DaskRegressor",
 ]
