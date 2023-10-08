@@ -1,8 +1,9 @@
-__version__ = "0.1.11"
+__version__ = "0.2.0rc8"
 
 from .damping import (
     BaseDamper,
     AdaDamp,
+    RadaDamp,
     PadaDamp,
     GeoDamp,
     GeoDampLR,
@@ -21,4 +22,5 @@ __all__ = [
     "GeoDampLR",
     "CntsDampLR",
     "GradientDescent",
+    "RadaDamp",
 ]

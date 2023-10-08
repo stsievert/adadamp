@@ -1,6 +1,5 @@
 from typing import Callable, Dict, Any, Tuple, Set, List, Optional, Union
-from pprint import pprint
-from copy import copy
+from copy import copy, deepcopy
 import itertools
 from time import time
 
@@ -65,7 +64,7 @@ class BaseDamper:
         max_batch_size: Optional[int] = None,
         best_train_loss: Optional[float] = None,
         random_state: Optional[int] = None,
-        dwell: int=20,
+        dwell: int = 20,
         **kwargs,
     ):
         # Public
@@ -112,22 +111,17 @@ class BaseDamper:
         start = time()
         updates = self._meta["model_updates"]
 
-        if (updates % self.dwell == 0) or updates <= 2 * self.dwell:
-            damping = self.damping()
-            self._meta["damping_time"] = time() - start
-            self._batch_size = int(damping)
-        else:
-            damping = self._meta["damping"]
-
+        damping = self.damping() if updates % self.dwell == 0 else self._meta["damping"]
+        self._meta["damping"] = damping
 
         # Is the batch size too large? If so, decay the learning rate
-        current_bs = self._batch_size
+        batch_size = deepcopy(damping)
         max_bs = self.max_batch_size
-        if max_bs is not None and current_bs >= max_bs:
-            self._set_lr(self._initial_lr * max_bs / current_bs)
-            self._batch_size = max_bs
+        if max_bs is not None and batch_size >= max_bs:
+            self._set_lr(self._initial_lr * max_bs / batch_size)
+            batch_size = max_bs
 
-        batch_loss, num_examples = self._step(**kwargs)
+        batch_loss, num_examples = self._step(batch_size, **kwargs)
         epochs = self._meta["num_examples"] / self._meta["len_dataset"]
         if (batch_loss >= 1e6 or np.isnan(batch_loss)) and epochs > 1:
             raise ConvergenceError(
@@ -137,11 +131,15 @@ class BaseDamper:
         self._meta["model_updates"] += 1
         self._meta["time"] = time()
         self._meta["step_time"] = time() - start
-        self._meta["damping"] = damping
         self._meta["lr_"] = self._get_lr()
         self._meta["num_examples"] += num_examples
         self._meta["batch_loss"] = batch_loss
-        self._meta["batch_size"] = self._batch_size
+        self._meta["batch_size_"] = batch_size
+        extras = self._step_callback(self._model)
+        self._meta.update(extras)
+
+    def _step_callback(self, model):
+        return {}
 
     def damping(self) -> int:
         """Determines how strongly noise in stochastic gradient
@@ -166,20 +164,23 @@ class BaseDamper:
     def _get_example_indices(self, batch_size=None):
         if batch_size is None:
             batch_size = self._batch_size
-        return self._rng.choice(len(self._dataset), size=batch_size)
+        if np.isnan(batch_size):
+            batch_size = np.inf
+        batch_size = min(batch_size, len(self._dataset))
+        return self._rng.choice(len(self._dataset), size=int(batch_size), replace=False)
 
     def _get_batch(self, batch_size=None):
-        idx = self._get_example_indices()
+        idx = self._get_example_indices(batch_size=batch_size)
         data_target = [self._dataset[i] for i in idx]
         data = [d[0].reshape(-1, *d[0].size()) for d in data_target]
         target = [d[1] for d in data_target]
         return torch.cat(data), torch.tensor(target)
 
-    def _step(self, **kwargs):
+    def _step(self, batch_size, **kwargs):
+        bs = batch_size
         start = time()
 
-        bs = self._batch_size
-        data, target = self._get_batch(batch_size=bs)
+        data, target = self._get_batch(batch_size=batch_size)
         self._sizes = {"data": data.size(), "target": target.size()}
 
         self._opt.zero_grad()
@@ -263,12 +264,113 @@ class BaseDamper:
                 output = self._model(data)
                 loss = self._loss(output, target, reduction="sum")
                 total_loss += loss.item()
+
                 if frac is not None and _num_eg >= num_eg:
                     break
         if frac is None:
             assert _num_eg == len(dataset)
         assert type(total_loss) == float
         return total_loss / _num_eg
+
+    def _get_grads(self, frac=None) -> List[np.ndarray]:
+        dataset = self._dataset
+        kwargs = (
+            {"num_workers": 0, "pin_memory": True} if torch.cuda.is_available() else {}
+        )
+        loader = torch.utils.data.DataLoader(
+            dataset, batch_size=1000, shuffle=True, **kwargs
+        )
+        num_eg = len(dataset)
+        if frac is not None:
+            num_eg = int(frac * len(dataset))
+
+        total_loss = 0
+        _num_eg = 0
+        for data, target in loader:
+            data, target = data.to(self._device), target.to(self._device)
+            _num_eg += len(data)
+            output = self._model(data)
+            loss = self._loss(output, target, reduction="sum")
+            loss.backward()
+
+            if frac is not None and _num_eg >= num_eg:
+                break
+        return [p.grad.detach().numpy() for p in self._model.parameters()]
+
+
+class RadaDamp(BaseDamper):
+    def __init__(self, *args, rho=0.999, dwell=1, fn_class="smooth", **kwargs):
+        self.rho = rho
+        self.fn_class = fn_class
+        super().__init__(*args, dwell=dwell, **kwargs)
+        self._meta["damper"] = "radadamp"
+
+    def _step_callback(self, model):
+        if self.fn_class != "smooth":
+            return {}
+
+        with torch.no_grad():
+            norm2 = 0.0
+            for p in model.parameters():
+                x = torch.norm(p.grad).item()
+                assert isinstance(x, (float, np.floating))
+                norm2 += float(x) ** 2
+
+        return {"_batch_grad_norm2": norm2, "_batch_grad_norm": np.sqrt(norm2)}
+
+    def step(self, *args, **kwargs):
+        limit = 50
+        _grad_key = "_batch_grad_norm2"
+        if self._meta["model_updates"] == 0:
+            grads = self._get_grads()
+            norm2 = sum(np.linalg.norm(g) ** 2 for g in grads)
+            norm = np.sqrt(norm2)
+            self._meta["_initial_norm2"] = copy(norm2)
+            self._meta["_batch_grad_norm2"] = copy(norm2)
+            self._meta["_batch_grad_norm"] = copy(norm)
+
+            loss = self._get_loss(frac=0.01)
+            self._meta["_initial_loss"] = loss
+
+            self._meta["_grad_mavg"] = 0.0
+            self._meta["_loss_mavg"] = 0.0
+
+        elif self._meta["model_updates"] < limit:
+            # avoid initial large gradients
+            self._meta["_grad_mavg"] += copy(self._meta[_grad_key])
+
+            self._meta["_loss_mavg"] += copy(
+                self._meta["batch_loss"] or self._meta["_initial_loss"]
+            )
+        elif self._meta["model_updates"] == limit:
+            self._meta["_grad_mavg"] /= self._meta["model_updates"]
+            self._meta["_loss_mavg"] /= self._meta["model_updates"]
+            init_factor = self._meta["_loss_mavg"] + (0.05 * self._meta["_grad_mavg"])
+            self._meta["_initial_factor"] = init_factor
+        return super().step(*args, **kwargs)
+
+    @staticmethod
+    def _rolling_avg(current, past, rho):
+        return (1 - rho) * current + (rho * past)
+
+    def damping(self) -> int:
+        limit = 50
+        if self._meta["model_updates"] <= limit:
+            return self.initial_batch_size
+        _grad_key = "_batch_grad_norm2"
+        self._meta["_loss_mavg"] = self._rolling_avg(
+            self._meta["batch_loss"], self._meta["_loss_mavg"], self.rho
+        )
+        self._meta["_grad_mavg"] = self._rolling_avg(
+            self._meta[_grad_key], self._meta["_grad_mavg"], self.rho
+        )
+
+        div = self._meta["_loss_mavg"] + (1e-3 * self._meta["_grad_mavg"])
+
+        _factor = self._meta["_initial_factor"] / div
+        factor = max(1, _factor)
+        damping = int(self.initial_batch_size * factor)
+        return damping
 
 
 class AdaDamp(BaseDamper):

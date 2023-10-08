@@ -14,7 +14,7 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import TensorDataset, random_split
 
-from adadamp import BaseDamper, GeoDamp, AdaDamp, PadaDamp, GradientDescent
+from adadamp import BaseDamper, GeoDamp, AdaDamp, PadaDamp, GradientDescent, RadaDamp
 import adadamp.experiment as experiment
 
 
@@ -105,11 +105,11 @@ def test_basics(model, dataset, epochs=14):
         data += train_data
 
     df = pd.DataFrame(data)
-    assert (df.model_updates * df.batch_size == df.num_examples).all()
+    assert (df.model_updates * df.initial_batch_size == df.num_examples).all()
     assert df.epochs.max() <= epochs + 2
     eg_per_epoch = df.num_examples.diff().iloc[1:]
     len_dataset = df.len_dataset.iloc[1:]
-    assert all((eg_per_epoch - len_dataset) <= df.batch_size.iloc[1:])
+    assert all((eg_per_epoch - len_dataset) <= df.initial_batch_size.iloc[1:])
 
 
 def test_basics_imgs(images):
@@ -189,7 +189,7 @@ def test_adadamp(model, dataset):
 
     bs_hat = init_bs * df.loc[0, "_initial_loss"] / df._complete_loss
     bs_hat = np.ceil(bs_hat.values).astype(int)
-    bs = df.batch_size.values
+    bs = df.batch_size_.values
     assert (bs_hat <= bs).all()
     #  assert (bs == bs_hat).all()
 
@@ -205,7 +205,7 @@ def test_gradient_descent(model, dataset):
         data += train_data
     df = pd.DataFrame(data)
     assert (df.batch_loss.diff().dropna() < 0).all()
-    assert (df.len_dataset == df.batch_size).all()
+    assert (df.len_dataset == df.batch_size_).all()
     assert np.allclose(df.epochs.diff().dropna(), 1)
 
 
@@ -316,11 +316,11 @@ def test_dwell_init_geo_increase(model, dataset):
     dbs = sum(dbs, [])
     assert len(dbs) == 15
     # Because of exponential increase initially for geodamp
-    assert (df.batch_size.iloc[1 : 1 + len(dbs)] <= np.array(dbs)).all()
-    dbs = [[cbs[2**i]] * 2**i for i in range(4)]  # discrete bs
+    assert (df.batch_size_.iloc[1 : 1 + len(dbs)] <= np.array(dbs)).all()
+    dbs = [[cbs[2 ** i]] * 2 ** i for i in range(4)]  # discrete bs
     dbs = sum(dbs, [])
     assert len(dbs) == 15
-    assert (df.batch_size.iloc[1:1 + len(dbs)] <= np.array(dbs)).all()
+    assert (df.batch_size_.iloc[1 : 1 + len(dbs)] <= np.array(dbs)).all()
 
 
 def test_lr_decays(model, dataset):
@@ -344,11 +344,39 @@ def test_lr_decays(model, dataset):
     damping_factor = df.damping / 4
 
     # Damping always increasing/decreasing
-    assert (np.diff(df.batch_size) >= 0).all()
+    assert (np.diff(df.batch_size_) >= 0).all()
     assert (np.diff(df.lr_) <= 0).all()
     assert (np.diff(damping_factor) >= 0).all()
 
     # Make sure increases by correct amounts
     assert set(damping_factor.unique()) == {1, 2, 4, 8, 16, 32}
-    assert set(df.batch_size) == {4, 8}
-    assert set(df.lr_) == {1, 1/2, 1/4, 1/8, 1/16}
+    assert set(df.batch_size_) == {4, 8}
+    assert set(df.lr_) == {1, 1 / 2, 1 / 4, 1 / 8, 1 / 16}
+
+
+@pytest.fixture
+def medium_dataset():
+    X, y = make_classification(
+        n_features=20, n_samples=2000, n_classes=10, n_informative=10
+    )
+    return TensorDataset(
+        torch.from_numpy(X.astype("float32")), torch.from_numpy(y.astype("int64"))
+    )
+
+
+def test_radadamp(model, medium_dataset):
+    _opt = optim.Adadelta(model.parameters())
+    ibs = 10
+    mbs = 1000
+    opt = RadaDamp(
+        model, medium_dataset, _opt, initial_batch_size=ibs, max_batch_size=mbs
+    )
+    data = []
+    for epoch in range(1, 16 + 1):
+        model, opt, meta, train_data = experiment.train(model, opt)
+        data.extend(train_data)
+
+    df = pd.DataFrame(data)
+    assert (df.batch_size_ >= ibs).all(), "Make sure better than init"
+    assert (df.batch_size_.diff().iloc[1:] >= 0).all(), "Ensure loss decreasing"
+    assert (df.batch_size_ <= mbs).all(), "safety check"

@@ -94,7 +94,7 @@ Convergence
 
 
 .. [1] "Improving the convergence of SGD with adaptive batch
-   sizes".  Scott Sievert and Zachary Charles. 2019.
+   sizes".  Scott Sievert and Shrey Shah. 2021.
    https://arxiv.org/abs/1910.08222
 
 .. [2] "Gradient Diversity: a Key Ingredient for Scalable Distributed
