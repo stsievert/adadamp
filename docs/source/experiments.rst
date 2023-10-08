@@ -78,7 +78,7 @@ Distributed experiments
 in my SciPy 2020 proposal.*
 
 .. [1] "Improving the convergence of SGD with adaptive batch
-   sizes".  Scott Sievert and Zachary Charles. 2019.
+   sizes".  Scott Sievert and Shrey Shah. 2021.
    https://arxiv.org/abs/1910.08222
 
 .. [imagenet-1hr] Section 5.5 of "Accurate, Large Minibatch SGD: Training
