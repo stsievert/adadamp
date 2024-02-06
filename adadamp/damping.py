@@ -321,6 +321,7 @@ class RadaDamp(BaseDamper):
     def step(self, *args, **kwargs):
         limit = 50
         _grad_key = "_batch_grad_norm2"
+        self._meta["batch_loss_m1"] = deepcopy(self._meta["batch_loss"])
         if self._meta["model_updates"] == 0:
             grads = self._get_grads()
             norm2 = sum(np.linalg.norm(g) ** 2 for g in grads)
@@ -366,8 +367,10 @@ class RadaDamp(BaseDamper):
         )
 
         div = self._meta["_loss_mavg"] + (1e-3 * self._meta["_grad_mavg"])
+        den = self._meta[_grad_key]
+        num = max(0, self._meta.get("batch_loss_m1"], 0) - self._meta["batch_loss"])
 
-        _factor = self._meta["_initial_factor"] / div
+        _factor = self._meta["_initial_factor"] * num / den
         factor = max(1, _factor)
         damping = int(self.initial_batch_size * factor)
         return damping
