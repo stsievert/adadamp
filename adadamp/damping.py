@@ -174,7 +174,12 @@ class BaseDamper:
         data_target = [self._dataset[i] for i in idx]
         data = [d[0].reshape(-1, *d[0].size()) for d in data_target]
         target = [d[1] for d in data_target]
-        return torch.cat(data), torch.tensor(target)
+        if target[0].ndim == 1:
+            t_out = torch.tensor(target)
+        else:
+            target2 = [t.reshape(-1, *t[0].size()) for t in target]
+            t_out = torch.stack(target2)
+        return torch.cat(data), t_out
 
     def _step(self, batch_size, **kwargs):
         bs = batch_size

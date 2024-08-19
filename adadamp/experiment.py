@@ -50,9 +50,7 @@ def run(
             _s = {
                 k: v
                 for k, v in data[-1].items()
-                if k in data[-1]
-                and k
-                in [
+                if k in [
                     "damper",
                     "lr_",
                     "model_updates",
@@ -61,8 +59,8 @@ def run(
                     "best_train_loss",
                     "epochs",
                     "damping",
-                    "test_accuracy",
-                    "train_accuracy",
+                    #"test_accuracy",
+                    #"train_accuracy",
                     "test_loss",
                     "train_loss",
                     "damping",
@@ -136,7 +134,7 @@ def train(
         if verbose and opt._meta["num_examples"] >= old_examples + print_eg:
             frac = opt._meta["num_examples"] / opt._meta["len_dataset"]
             print(f"Epochs: {frac:0.2f}")
-            pprint(opt._meta)
+            #pprint(opt._meta)
             old_examples = opt._meta["num_examples"]
     meta = {
         "_epochs": epochs,
