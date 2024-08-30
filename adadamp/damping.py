@@ -300,7 +300,7 @@ class BaseDamper:
 
             if frac is not None and _num_eg >= num_eg:
                 break
-        return [p.grad.detach().numpy() for p in self._model.parameters()]
+        return [p.grad.detach().cpu().numpy() for p in self._model.parameters()]
 
 
 class RadaDamp(BaseDamper):
