@@ -1,8 +1,8 @@
 from typing import List, Dict, Tuple, Any, Union, Optional, Callable
 import itertools
-from pprint import pprint
 from time import time
 
+import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch
@@ -17,6 +17,21 @@ def breakpoint():
 
     pdb.set_trace()
 
+def _clean(x: Any) -> Any:
+    if isinstance(x, dict):
+        return {k: _clean(v) for k, v in x.items()}
+    if isinstance(x, float):
+        if 10 <= x:
+            if np.allclose(x, int(x)):
+                return str(int(x))
+            return f"{x:0.1f}"
+        if 1 <= x < 10:
+            return f"{x:0.2f}"
+        if 0.01 < x <= 1:
+            return f"{x:0.3f}"
+        if x < 0.01:
+            return f"{x:0.3e}"
+    return x
 
 def run(
     model=None,
@@ -66,7 +81,7 @@ def run(
                     "damping",
                 ]
             }
-            pprint(_s)
+            print(_clean(_s))
         epoch = data[-1]["epochs"]
         mu = data[-1]["model_updates"]
         if epoch >= args["epochs"]:
@@ -134,7 +149,7 @@ def train(
         if verbose and opt._meta["num_examples"] >= old_examples + print_eg:
             frac = opt._meta["num_examples"] / opt._meta["len_dataset"]
             print(f"Epochs: {frac:0.2f}")
-            #pprint(opt._meta)
+            print(_clean(opt._meta))
             old_examples = opt._meta["num_examples"]
     meta = {
         "_epochs": epochs,
