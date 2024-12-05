@@ -69,9 +69,7 @@ class BaseDamper:
     ):
         # Public
         self.initial_batch_size = initial_batch_size
-        if max_batch_size is None:
-            max_batch_size = len(dataset)
-        self.max_batch_size = max_batch_size
+        self.max_batch_size = max_batch_size or len(dataset)
         self.dwell = dwell
 
         # Private
@@ -123,7 +121,7 @@ class BaseDamper:
 
         batch_loss, num_examples = self._step(batch_size, **kwargs)
         epochs = self._meta["num_examples"] / self._meta["len_dataset"]
-        if (batch_loss >= 1e6 or np.isnan(batch_loss)) and epochs > 1:
+        if (batch_loss >= 3e3 or np.isnan(batch_loss)) and epochs > 1:
             raise ConvergenceError(
                 f"The model is diverging; batch_loss={batch_loss:0.2e}"
             )
@@ -176,6 +174,8 @@ class BaseDamper:
         target = [d[1] for d in data_target]
         if target[0].ndim == 1:
             t_out = torch.tensor(target)
+        elif target[0].ndim == 0:
+            t_out = torch.tensor([t.item() for t in target])
         else:
             target2 = [t.reshape(-1, *t[0].size()) for t in target]
             t_out = torch.stack(target2)
