@@ -98,7 +98,6 @@ def run(
             break
         train_data += epoch_data
         data[-1].update(epoch_meta)
-
     return data, train_data
 
 

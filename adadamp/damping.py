@@ -304,10 +304,11 @@ class BaseDamper:
 
 
 class RadaDamp(BaseDamper):
-    def __init__(self, *args, rho=0.999, dwell=1, fn_class="smooth", **kwargs):
+    def __init__(self, *args, fudge=0.01, rho=0.999, fn_class="smooth", **kwargs):
         self.rho = rho
         self.fn_class = fn_class
-        super().__init__(*args, dwell=dwell, **kwargs)
+        self.fudge = fudge
+        super().__init__(*args, **kwargs)
         self._meta["damper"] = "radadamp"
 
     def _step_callback(self, model):
@@ -350,7 +351,7 @@ class RadaDamp(BaseDamper):
         elif self._meta["model_updates"] == limit:
             self._meta["_grad_mavg"] /= self._meta["model_updates"]
             self._meta["_loss_mavg"] /= self._meta["model_updates"]
-            init_factor = self._meta["_loss_mavg"] + (0.05 * self._meta["_grad_mavg"])
+            init_factor = (self.fudge * self._meta["_loss_mavg"]) + (self._meta["_grad_mavg"])
             self._meta["_initial_factor"] = init_factor
         return super().step(*args, **kwargs)
 
@@ -370,7 +371,7 @@ class RadaDamp(BaseDamper):
             self._meta[_grad_key], self._meta["_grad_mavg"], self.rho
         )
 
-        div = self._meta["_loss_mavg"] + (1e-3 * self._meta["_grad_mavg"])
+        div = self.fudge * self._meta["_loss_mavg"] + (self._meta["_grad_mavg"])
 
         _factor = self._meta["_initial_factor"] / div
         factor = max(1, _factor)
