@@ -302,6 +302,38 @@ class BaseDamper:
                 break
         return [p.grad.detach().cpu().numpy() for p in self._model.parameters()]
 
+class AdaDampNN(BaseDamper):
+    def __init__(self, *args, approx=False, best_norm2=1, **kwargs):
+        self.approx = approx
+        super().__init__(*args, **kwargs)
+        self._meta["damper"] = "adadampnn"
+        self._meta["_last_batch_losses"] = [None] * 10
+
+    def damping(self) -> int:
+        if self.approx:
+            grads = self._get_grads(frac=0.1)
+        else:
+            grads = self._get_grads()
+
+        with torch.no_grad():
+            norm2 = sum(np.sum(g**2) for g in grads)
+        n_params = sum(g.size for g in grads)
+        norm2 /= n_params
+
+        if norm2 >= 1e4:
+            raise ConvergenceError(f"norm2 too high, ({norm2:0.2e})")
+        if self._meta["model_updates"] == 0:
+            self._meta["_initial"] = norm2
+        self._meta["_current"] = norm2
+
+        _initial = self._meta["_initial"]
+        _current = self._meta["_current"]
+
+        if self._meta.get("best_norm2", None) is not None:
+            initial_loss -= self._meta["best_norm2"]
+            loss -= self._meta["best_norm2"]
+        bs = _ceil(self.initial_batch_size * _initial / _current)
+        return self.initial_batch_size #bs
 
 class RadaDamp(BaseDamper):
     def __init__(self, *args, fudge=0.01, rho=0.999, fn_class="smooth", **kwargs):
