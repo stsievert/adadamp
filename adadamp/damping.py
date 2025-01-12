@@ -190,7 +190,7 @@ class BaseDamper:
 
         self._opt.zero_grad()
 
-        mbs = 256
+        mbs = 32 * 3
         if bs <= mbs:
             data, target = data.to(self._device), target.to(self._device)
             output = self._model(data)
@@ -277,7 +277,7 @@ class BaseDamper:
         assert type(total_loss) == float
         return total_loss / _num_eg
 
-    def _get_grads(self, frac=None) -> List[np.ndarray]:
+    def _get_grads(self, frac=None) -> Tuple[float, List[np.ndarray]]:
         dataset = self._dataset
         kwargs = (
             {"num_workers": 0, "pin_memory": True} if torch.cuda.is_available() else {}
@@ -297,43 +297,53 @@ class BaseDamper:
             output = self._model(data)
             loss = self._loss(output, target, reduction="sum")
             loss.backward()
+            total_loss += float(loss)
 
             if frac is not None and _num_eg >= num_eg:
                 break
-        return [p.grad.detach().cpu().numpy() for p in self._model.parameters()]
+        return total_loss / _num_eg, [p.grad.detach().cpu().numpy() for p in self._model.parameters()]
 
 class AdaDampNN(BaseDamper):
-    def __init__(self, *args, approx=False, best_norm2=1, **kwargs):
+    def __init__(self, *args, noisy=False, approx=False, best_norm2=1, **kwargs):
         self.approx = approx
+        self.noisy = noisy
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "adadampnn"
         self._meta["_last_batch_losses"] = [None] * 10
+        self._counter = 0
 
     def damping(self) -> int:
+        self._opt.zero_grad()
         if self.approx:
-            grads = self._get_grads(frac=0.1)
+            loss, grads = self._get_grads(frac=0.1)
         else:
-            grads = self._get_grads()
+            loss, grads = self._get_grads()
+        self._opt.zero_grad()
 
         with torch.no_grad():
             norm2 = sum(np.sum(g**2) for g in grads)
         n_params = sum(g.size for g in grads)
         norm2 /= n_params
 
-        if norm2 >= 1e4:
-            raise ConvergenceError(f"norm2 too high, ({norm2:0.2e})")
+        if loss >= 1e4:
+            raise ConvergenceError(f"loss too high, ({loss:0.2e})")
         if self._meta["model_updates"] == 0:
             self._meta["_initial"] = norm2
+            return self.initial_batch_size
+
         self._meta["_current"] = norm2
 
         _initial = self._meta["_initial"]
         _current = self._meta["_current"]
+        #print(f"{self._counter} {_initial:0.3f} {_current:0.3f}")#, {bs}")
 
-        if self._meta.get("best_norm2", None) is not None:
-            initial_loss -= self._meta["best_norm2"]
-            loss -= self._meta["best_norm2"]
+        #if self._meta.get("best_norm2", None) is not None:
+        #    initial_loss -= self._meta["best_norm2"]
+        #    loss -= self._meta["best_norm2"]
         bs = _ceil(self.initial_batch_size * _initial / _current)
-        return self.initial_batch_size #bs
+        if self.noisy:
+            return max(self.initial_batch_size, bs)
+        return bs
 
 class RadaDamp(BaseDamper):
     def __init__(self, *args, fudge=0.01, rho=0.999, fn_class="smooth", **kwargs):

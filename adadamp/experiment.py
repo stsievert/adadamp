@@ -44,7 +44,7 @@ def run(
     verbose: bool = False,
     device: str = "cpu",
 ):
-    kwargs = {"num_workers": 0, "pin_memory": True} if "cuda" in device else {}
+    kwargs = {"num_workers": 0, "pin_memory": True} if "cuda" in device.type else {}
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=1000, **kwargs)
     train_test_loader = torch.utils.data.DataLoader(
         train_set, batch_size=1000, **kwargs
@@ -61,26 +61,25 @@ def run(
         data.append(
             {"epoch_time": time(), **args, **opt.meta, **_train_stats, **test_stats}
         )
-        if verbose:
+        if False:#verbose:
             _s = {
                 k: v
                 for k, v in data[-1].items()
                 if k in [
-                    "damper",
-                    "lr_",
+                    #"damper",
+                    #"lr_",
                     "model_updates",
-                    "batch_size",
-                    "train_loss",
-                    "best_train_loss",
                     "epochs",
                     "damping",
+                    "batch_size",
+                    #"best_train_loss",
                     #"test_accuracy",
                     #"train_accuracy",
-                    "test_loss",
+                    #"test_loss",
                     "train_loss",
-                    "damping",
                 ]
             }
+            print([v for _, v in _s.items()])
             print(_clean(_s))
         epoch = data[-1]["epochs"]
         mu = data[-1]["model_updates"]
@@ -145,10 +144,10 @@ def train(
             break
         opt.step()
         data.append(opt.meta)
-        if verbose and opt._meta["num_examples"] >= old_examples + print_eg:
-            frac = opt._meta["num_examples"] / opt._meta["len_dataset"]
-            print(f"Epochs: {frac:0.2f}")
-            print(_clean(opt._meta))
+        if False:#verbose:# and opt._meta["num_examples"] >= old_examples + print_eg:
+            _epochs = opt._meta["num_examples"] / opt._meta["len_dataset"]
+            show = ["model_updates", "damping", "batch_size_"]
+            print(f"{_epochs:0.2f}", _clean([opt._meta[k] for k in show]))
             old_examples = opt._meta["num_examples"]
     meta = {
         "_epochs": epochs,
@@ -161,12 +160,12 @@ def train(
 def test(
     model=None, loss=None, loader=None, device: str = "cpu", prefix=""
 ):
-    assert isinstance(device, str)
+    assert isinstance(device.type, str)
 
     def _test(model):
         test_loss = 0
         correct = 0
-        _device = torch.device(device)
+        _device = device
         model = model.to(_device)
         for data, target in loader:
             data, target = data.to(_device), target.to(_device)
