@@ -461,61 +461,63 @@ class AdaDamp(BaseDamper):
 
 
 class PadaDamp(BaseDamper):
-    r"""
+    """
+    Practical AdaDamp
+
     Parameters
     ----------
-    args : list
-        Passed to BaseDamper
-    batch_growth_rate : float
-        The rate to increase the damping by. That is, set the batch size
-        to be
-
-        .. math::
-
-           B_k = B_0 \lceil \textrm{rate}\cdot k \rceil
-
-        after the model is updated :math:`k` times.
-    kwargs : dict
-        Passed to BaseDamper
-
-    Notes
-    -----
-    The number of epochs is
-
-    .. math::
-
-        uB_0 + \sum_{i=1}^u \lceil \textrm{rate} \cdot k\rceil
-
-    for :math:`u` model updates.
-
-    .. note::
-
-       This class is only appropriate for non-convex and convex loss
-       functions. It is not appropriate for strongly convex loss or PL
-       functions.
-
+    rho : float (default=0.5)
+        Memory. High rho means slow adaptation, very stable. Low rho means very
+        adaptive, quick reaction.
     """
-
-    def __init__(self, *args, batch_growth_rate=None, **kwargs):
-        self.batch_growth_rate = batch_growth_rate
+    def __init__(self, *args, reduction: str = "mean", rho: float = 0.5, wait = 10, **kwargs):
+        self.reduction = reduction
+        self.rho = rho
+        self.wait = wait
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "padadamp"
+        self._meta["norm2_hist"] = []
+
+    def _step_callback(self, model):
+        with torch.no_grad():
+            grads = [x.grad.detach() for x in model.parameters()]
+            norms2 = [(g**2).sum() for g in grads]
+            norm2 = sum(norms2).item()
+        self._meta["norm2_hist"].append(norm2)
+        return {}
 
     def damping(self) -> int:
-        r"""Approximate AdaDamp with less computation via
+        if self._meta["model_updates"] == 0:
+            return self.initial_batch_size
 
-        .. math::
+        norms2 = self._meta["norm2_hist"]
+        if self.reduction == "median":
+            norm2 = np.median(norms2)
+        elif self.reduction == "mean":
+            norm2 = np.mean(norms2)
+        elif self.reduction == "min":
+            norm2 = np.min(norms2)
+        elif self.reduction == "max":
+            norm2 = np.max(norms2)
+        #elif self.reduction == "exponential":
+        #    _norm2 = np.mean(norms2)
+        #    norm2 = self.rho * (1 - self.norm2) + (1 - self.rho) * _norm2
+        else:
+            raise ValueError(f"reduction={self.reduction} not recognized")
 
-            B_k = B_0 + \lceil \textrm{rate}\cdot k\rceil
+        if self._meta["model_updates"] <= self.wait:
+            self._initial = norm2
+            self.norm2 = norm2
+            return self.initial_batch_size
+        if not (0 <= self.rho <= 1):
+            raise ValueError(f"rho={self.rho} not between 0 and 1")
 
-        where k is the number of model updates.
-        """
-        k = self.meta["model_updates"]
-        b0 = self.initial_batch_size
-        bs = b0 + _ceil(self.batch_growth_rate * k)
-        bs_hat = (1 - np.exp(-3e-3 * k)) * bs
-        return max(b0 // 4, bs_hat)
+        self.norm2 = self.rho * self.norm2 + (1 - self.rho) * norm2
+        self._meta["norm2_hist"] = []
 
+        bs = _ceil(self.initial_batch_size * self._initial / self.norm2)
+        print(bs, self._meta["batch_loss"])
+        return bs
 
 class GeoDamp(BaseDamper):
     def __init__(self, *args, dampingdelay=5, dampingfactor=2, **kwargs):
