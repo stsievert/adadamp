@@ -505,18 +505,17 @@ class PadaDamp(BaseDamper):
         else:
             raise ValueError(f"reduction={self.reduction} not recognized")
 
-        if self._meta["model_updates"] <= self.wait:
+        if self._meta["model_updates"] <= max(self.dwell, self.wait):
             self._initial = norm2
             self.norm2 = norm2
             return self.initial_batch_size
-        if not (0 <= self.rho <= 1):
-            raise ValueError(f"rho={self.rho} not between 0 and 1")
+        if not (0 <= self.rho < 1):
+            raise ValueError(f"rho={self.rho} not valid, not in 0 <= rho < 1")
 
         self.norm2 = self.rho * self.norm2 + (1 - self.rho) * norm2
         self._meta["norm2_hist"] = []
 
         bs = _ceil(self.initial_batch_size * self._initial / self.norm2)
-        print(bs, self._meta["batch_loss"])
         return bs
 
 class GeoDamp(BaseDamper):
