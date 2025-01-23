@@ -341,8 +341,9 @@ class AdaDampNN(BaseDamper):
         #    initial_loss -= self._meta["best_norm2"]
         #    loss -= self._meta["best_norm2"]
         bs = _ceil(self.initial_batch_size * _initial / _current)
-        if self.noisy:
-            return max(self.initial_batch_size, bs)
+        #if self.noisy:
+
+        return max(self.initial_batch_size, bs)
         return bs
 
 class RadaDamp(BaseDamper):
@@ -459,8 +460,26 @@ class AdaDamp(BaseDamper):
             loss -= self._meta["best_train_loss"]
         return _ceil(self.initial_batch_size * initial_loss / loss)
 
-
 class PadaDamp(BaseDamper):
+    """
+    Passive AdaDamp
+
+    Parameters
+    ----------
+    rho : float (default=0.5)
+        Memory. High rho means slow adaptation, very stable. Low rho means very
+        adaptive, quick reaction.
+    """
+    def __init__(self, *args, growth_rate=1e-3, **kwargs):
+        self.growth_rate = growth_rate
+        super().__init__(*args, **kwargs)
+        self._meta["damper"] = "padadamp"
+
+    def damping(self):
+        mu = self._meta["model_updates"]
+        return _ceil(self.initial_batch_size * (1 + self.growth_rate * mu))
+
+class PrAdaDamp(BaseDamper):
     """
     Practical AdaDamp
 
@@ -475,7 +494,7 @@ class PadaDamp(BaseDamper):
         self.rho = rho
         self.wait = wait
         super().__init__(*args, **kwargs)
-        self._meta["damper"] = "padadamp"
+        self._meta["damper"] = "pradadamp"
         self._meta["norm2_hist"] = []
 
     def _step_callback(self, model):
@@ -516,6 +535,7 @@ class PadaDamp(BaseDamper):
         self._meta["norm2_hist"] = []
 
         bs = _ceil(self.initial_batch_size * self._initial / self.norm2)
+        return max(bs, self.initial_batch_size)
         return bs
 
 class GeoDamp(BaseDamper):
