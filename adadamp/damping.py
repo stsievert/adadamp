@@ -466,7 +466,6 @@ class RadaDamp(BaseDamper):
         self._meta["norm2_hist"] = []
         self._meta["loss_hist"] = []
         bs = self.initial_batch_size / (0.5 * (self.loss / loss_0 + self.norm2 / norm2_0))
-        print(bs)
         return _ceil(max(bs, self.initial_batch_size))
 
 class GeoDamp(BaseDamper):
