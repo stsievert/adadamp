@@ -109,7 +109,7 @@ class BaseDamper:
         start = time()
         updates = self._meta["model_updates"]
 
-        damping = self.damping() if updates % self.dwell == 0 else self._meta["damping"]
+        damping = self.damping() if updates % int(self.dwell) == 0 else self._meta["damping"]
         self._meta["damping"] = damping
 
         # Is the batch size too large? If so, decay the learning rate
@@ -342,8 +342,7 @@ class AdaDampNN(BaseDamper):
         #    loss -= self._meta["best_norm2"]
         bs = _ceil(self.initial_batch_size * _initial / _current)
         #if self.noisy:
-
-        return max(self.initial_batch_size, bs)
+        #return max(self.initial_batch_size, bs)
         return bs
 
 class RadaDamp(BaseDamper):
@@ -475,9 +474,10 @@ class PadaDamp(BaseDamper):
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "padadamp"
 
-    def damping(self):
+    def damping(self) -> int:
         mu = self._meta["model_updates"]
-        return _ceil(self.initial_batch_size * (1 + self.growth_rate * mu))
+        bs = self.initial_batch_size + self.growth_rate * mu
+        return _ceil(bs)
 
 class PrAdaDamp(BaseDamper):
     """
