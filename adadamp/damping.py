@@ -414,7 +414,7 @@ class RadaDamp(BaseDamper):
         Memory. High rho means slow adaptation, very stable. Low rho means very
         adaptive, quick reaction.
     """
-    def __init__(self, *args, reduction: str = "mean", rho: float = 0.5, **kwargs):
+    def __init__(self, *args, reduction: str = "min", rho: float = 0.2, **kwargs):
         self.reduction = reduction
         self.rho = rho
         super().__init__(*args, **kwargs)
