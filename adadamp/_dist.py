@@ -20,7 +20,7 @@ from torch.utils.data import Dataset, IterableDataset, TensorDataset
 from torch.nn.modules.loss import _Loss as Loss
 
 IntArray = Union[List[int], np.ndarray, torch.Tensor]
-Number = Union[int, float, np.integer, np.float]
+Number = Union[int, float, np.integer]
 Model = NewType("Model", torch.nn.Module)
 Grads = NewType("Grads", Dict[str, Union[torch.Tensor, float, int]])
 ArrayLike = Union[np.ndarray, torch.Tensor, List[Number]]

@@ -1,8 +1,8 @@
 from typing import List, Dict, Tuple, Any, Union, Optional, Callable
 import itertools
-from pprint import pprint
 from time import time
 
+import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch
@@ -17,6 +17,21 @@ def breakpoint():
 
     pdb.set_trace()
 
+def _clean(x: Any) -> Any:
+    if isinstance(x, dict):
+        return {k: _clean(v) for k, v in x.items()}
+    if isinstance(x, float):
+        if 10 <= x:
+            if np.allclose(x, int(x)):
+                return str(int(x))
+            return f"{x:0.1f}"
+        if 1 <= x < 10:
+            return f"{x:0.2f}"
+        if 0.01 < x <= 1:
+            return f"{x:0.3f}"
+        if x < 0.01:
+            return f"{x:0.3e}"
+    return x
 
 def run(
     model=None,
@@ -29,7 +44,7 @@ def run(
     verbose: bool = False,
     device: str = "cpu",
 ):
-    kwargs = {"num_workers": 0, "pin_memory": True} if "cuda" in device else {}
+    kwargs = {"num_workers": 0, "pin_memory": True} if "cuda" in device.type else {}
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=1000, **kwargs)
     train_test_loader = torch.utils.data.DataLoader(
         train_set, batch_size=1000, **kwargs
@@ -46,29 +61,26 @@ def run(
         data.append(
             {"epoch_time": time(), **args, **opt.meta, **_train_stats, **test_stats}
         )
-        if verbose:
+        if False:#verbose:
             _s = {
                 k: v
                 for k, v in data[-1].items()
-                if k in data[-1]
-                and k
-                in [
-                    "damper",
-                    "lr_",
+                if k in [
+                    #"damper",
+                    #"lr_",
                     "model_updates",
-                    "batch_size",
-                    "train_loss",
-                    "best_train_loss",
                     "epochs",
                     "damping",
-                    "test_accuracy",
-                    "train_accuracy",
-                    "test_loss",
+                    "batch_size",
+                    #"best_train_loss",
+                    #"test_accuracy",
+                    #"train_accuracy",
+                    #"test_loss",
                     "train_loss",
-                    "damping",
                 ]
             }
-            pprint(_s)
+            print([v for _, v in _s.items()])
+            print(_clean(_s))
         epoch = data[-1]["epochs"]
         mu = data[-1]["model_updates"]
         if epoch >= args["epochs"]:
@@ -85,7 +97,6 @@ def run(
             break
         train_data += epoch_data
         data[-1].update(epoch_meta)
-
     return data, train_data
 
 
@@ -133,10 +144,10 @@ def train(
             break
         opt.step()
         data.append(opt.meta)
-        if verbose and opt._meta["num_examples"] >= old_examples + print_eg:
-            frac = opt._meta["num_examples"] / opt._meta["len_dataset"]
-            print(f"Epochs: {frac:0.2f}")
-            pprint(opt._meta)
+        if False:#verbose:# and opt._meta["num_examples"] >= old_examples + print_eg:
+            _epochs = opt._meta["num_examples"] / opt._meta["len_dataset"]
+            show = ["model_updates", "damping", "batch_size_"]
+            print(f"{_epochs:0.2f}", _clean([opt._meta[k] for k in show]))
             old_examples = opt._meta["num_examples"]
     meta = {
         "_epochs": epochs,
@@ -149,12 +160,12 @@ def train(
 def test(
     model=None, loss=None, loader=None, device: str = "cpu", prefix=""
 ):
-    assert isinstance(device, str)
+    assert isinstance(device.type, str)
 
     def _test(model):
         test_loss = 0
         correct = 0
-        _device = torch.device(device)
+        _device = device
         model = model.to(_device)
         for data, target in loader:
             data, target = data.to(_device), target.to(_device)

@@ -65,14 +65,14 @@ class BaseDamper:
         best_train_loss: Optional[float] = None,
         random_state: Optional[int] = None,
         dwell: int = 20,
+        wait: int = 100,
         **kwargs,
     ):
         # Public
         self.initial_batch_size = initial_batch_size
-        if max_batch_size is None:
-            max_batch_size = len(dataset)
-        self.max_batch_size = max_batch_size
+        self.max_batch_size = max_batch_size or len(dataset)
         self.dwell = dwell
+        self.wait = wait
 
         # Private
         self._model = model
@@ -111,8 +111,11 @@ class BaseDamper:
         start = time()
         updates = self._meta["model_updates"]
 
-        damping = self.damping() if updates % self.dwell == 0 else self._meta["damping"]
-        self._meta["damping"] = damping
+        if updates == 0 or (
+            updates >= self.wait and updates % int(self.dwell) == 0
+        ):
+            self._meta["damping"] = self.damping()
+        damping = self._meta["damping"]
 
         # Is the batch size too large? If so, decay the learning rate
         batch_size = deepcopy(damping)
@@ -123,7 +126,7 @@ class BaseDamper:
 
         batch_loss, num_examples = self._step(batch_size, **kwargs)
         epochs = self._meta["num_examples"] / self._meta["len_dataset"]
-        if (batch_loss >= 1e6 or np.isnan(batch_loss)) and epochs > 1:
+        if (batch_loss >= 3e3 or np.isnan(batch_loss)) and epochs > 1:
             raise ConvergenceError(
                 f"The model is diverging; batch_loss={batch_loss:0.2e}"
             )
@@ -174,7 +177,14 @@ class BaseDamper:
         data_target = [self._dataset[i] for i in idx]
         data = [d[0].reshape(-1, *d[0].size()) for d in data_target]
         target = [d[1] for d in data_target]
-        return torch.cat(data), torch.tensor(target)
+        if target[0].ndim == 1:
+            t_out = torch.tensor(target)
+        elif target[0].ndim == 0:
+            t_out = torch.tensor([t.item() for t in target])
+        else:
+            target2 = [t.reshape(-1, *t[0].size()) for t in target]
+            t_out = torch.stack(target2)
+        return torch.cat(data), t_out
 
     def _step(self, batch_size, **kwargs):
         bs = batch_size
@@ -185,7 +195,7 @@ class BaseDamper:
 
         self._opt.zero_grad()
 
-        mbs = 256
+        mbs = 32 * 3
         if bs <= mbs:
             data, target = data.to(self._device), target.to(self._device)
             output = self._model(data)
@@ -272,7 +282,7 @@ class BaseDamper:
         assert type(total_loss) == float
         return total_loss / _num_eg
 
-    def _get_grads(self, frac=None) -> List[np.ndarray]:
+    def _get_grads(self, frac=None) -> Tuple[float, List[np.ndarray]]:
         dataset = self._dataset
         kwargs = (
             {"num_workers": 0, "pin_memory": True} if torch.cuda.is_available() else {}
@@ -292,85 +302,47 @@ class BaseDamper:
             output = self._model(data)
             loss = self._loss(output, target, reduction="sum")
             loss.backward()
+            total_loss += float(loss)
 
             if frac is not None and _num_eg >= num_eg:
                 break
-        return [p.grad.detach().numpy() for p in self._model.parameters()]
+        return total_loss / _num_eg, [p.grad.detach().cpu().numpy() for p in self._model.parameters()]
 
-
-class RadaDamp(BaseDamper):
-    def __init__(self, *args, rho=0.999, dwell=1, fn_class="smooth", **kwargs):
-        self.rho = rho
-        self.fn_class = fn_class
-        super().__init__(*args, dwell=dwell, **kwargs)
-        self._meta["damper"] = "radadamp"
-
-    def _step_callback(self, model):
-        if self.fn_class != "smooth":
-            return {}
-
-        with torch.no_grad():
-            norm2 = 0.0
-            for p in model.parameters():
-                x = torch.norm(p.grad).item()
-                assert isinstance(x, (float, np.floating))
-                norm2 += float(x) ** 2
-
-        return {"_batch_grad_norm2": norm2, "_batch_grad_norm": np.sqrt(norm2)}
-
-    def step(self, *args, **kwargs):
-        limit = 50
-        _grad_key = "_batch_grad_norm2"
-        if self._meta["model_updates"] == 0:
-            grads = self._get_grads()
-            norm2 = sum(np.linalg.norm(g) ** 2 for g in grads)
-            norm = np.sqrt(norm2)
-            self._meta["_initial_norm2"] = copy(norm2)
-            self._meta["_batch_grad_norm2"] = copy(norm2)
-            self._meta["_batch_grad_norm"] = copy(norm)
-
-            loss = self._get_loss(frac=0.01)
-            self._meta["_initial_loss"] = loss
-
-            self._meta["_grad_mavg"] = 0.0
-            self._meta["_loss_mavg"] = 0.0
-
-        elif self._meta["model_updates"] < limit:
-            # avoid initial large gradients
-            self._meta["_grad_mavg"] += copy(self._meta[_grad_key])
-
-            self._meta["_loss_mavg"] += copy(
-                self._meta["batch_loss"] or self._meta["_initial_loss"]
-            )
-        elif self._meta["model_updates"] == limit:
-            self._meta["_grad_mavg"] /= self._meta["model_updates"]
-            self._meta["_loss_mavg"] /= self._meta["model_updates"]
-            init_factor = self._meta["_loss_mavg"] + (0.05 * self._meta["_grad_mavg"])
-            self._meta["_initial_factor"] = init_factor
-        return super().step(*args, **kwargs)
-
-    @staticmethod
-    def _rolling_avg(current, past, rho):
-        return (1 - rho) * current + (rho * past)
+class AdaDampNN(BaseDamper):
+    def __init__(self, *args, noisy=False, approx=False, best_norm2=1, **kwargs):
+        self.approx = approx
+        self.noisy = noisy
+        super().__init__(*args, **kwargs)
+        self._meta["damper"] = "adadampnn"
+        self._meta["_last_batch_losses"] = [None] * 10
+        self._counter = 0
 
     def damping(self) -> int:
-        limit = 50
-        if self._meta["model_updates"] <= limit:
+        self._opt.zero_grad()
+        if self.approx:
+            loss, grads = self._get_grads(frac=0.1)
+        else:
+            loss, grads = self._get_grads()
+        self._opt.zero_grad()
+
+        with torch.no_grad():
+            norm2 = sum(np.sum(g**2) for g in grads)
+        n_params = sum(g.size for g in grads)
+        norm2 /= n_params
+
+        if loss >= 1e4:
+            raise ConvergenceError(f"loss too high, ({loss:0.2e})")
+        if self._meta["model_updates"] == 0:
+            self._meta["_initial"] = norm2
             return self.initial_batch_size
-        _grad_key = "_batch_grad_norm2"
-        self._meta["_loss_mavg"] = self._rolling_avg(
-            self._meta["batch_loss"], self._meta["_loss_mavg"], self.rho
-        )
-        self._meta["_grad_mavg"] = self._rolling_avg(
-            self._meta[_grad_key], self._meta["_grad_mavg"], self.rho
-        )
 
-        div = self._meta["_loss_mavg"] + (1e-3 * self._meta["_grad_mavg"])
+        self._meta["_current"] = norm2
 
-        _factor = self._meta["_initial_factor"] / div
-        factor = max(1, _factor)
-        damping = int(self.initial_batch_size * factor)
-        return damping
+        _initial = self._meta["_initial"]
+        _current = self._meta["_current"]
+
+        bs = _ceil(self.initial_batch_size * _initial / _current)
+        return bs
 
 
 class AdaDamp(BaseDamper):
@@ -411,63 +383,90 @@ class AdaDamp(BaseDamper):
             loss -= self._meta["best_train_loss"]
         return _ceil(self.initial_batch_size * initial_loss / loss)
 
-
 class PadaDamp(BaseDamper):
-    r"""
+    """
+    Passive AdaDamp
+
     Parameters
     ----------
-    args : list
-        Passed to BaseDamper
-    batch_growth_rate : float
-        The rate to increase the damping by. That is, set the batch size
-        to be
-
-        .. math::
-
-           B_k = B_0 \lceil \textrm{rate}\cdot k \rceil
-
-        after the model is updated :math:`k` times.
-    kwargs : dict
-        Passed to BaseDamper
-
-    Notes
-    -----
-    The number of epochs is
-
-    .. math::
-
-        uB_0 + \sum_{i=1}^u \lceil \textrm{rate} \cdot k\rceil
-
-    for :math:`u` model updates.
-
-    .. note::
-
-       This class is only appropriate for non-convex and convex loss
-       functions. It is not appropriate for strongly convex loss or PL
-       functions.
-
+    rho : float (default=0.5)
+        Memory. High rho means slow adaptation, very stable. Low rho means very
+        adaptive, quick reaction.
     """
-
-    def __init__(self, *args, batch_growth_rate=None, **kwargs):
-        self.batch_growth_rate = batch_growth_rate
+    def __init__(self, *args, growth_rate=1e-3, **kwargs):
+        self.growth_rate = growth_rate
         super().__init__(*args, **kwargs)
         self._meta["damper"] = "padadamp"
 
     def damping(self) -> int:
-        r"""Approximate AdaDamp with less computation via
+        mu = self._meta["model_updates"]
+        bs = self.initial_batch_size + self.growth_rate * mu
+        return _ceil(bs)
 
-        .. math::
 
-            B_k = B_0 + \lceil \textrm{rate}\cdot k\rceil
+class RadaDamp(BaseDamper):
+    """
+    Rolling averave AdaDamp
 
-        where k is the number of model updates.
-        """
-        k = self.meta["model_updates"]
-        b0 = self.initial_batch_size
-        bs = b0 + _ceil(self.batch_growth_rate * k)
-        bs_hat = (1 - np.exp(-3e-3 * k)) * bs
-        return max(b0 // 4, bs_hat)
+    Parameters
+    ----------
+    rho : float (default=0.5)
+        Memory. High rho means slow adaptation, very stable. Low rho means very
+        adaptive, quick reaction.
+    """
+    def __init__(self, *args, reduction: str = "min", rho: float = 0.2, **kwargs):
+        self.reduction = reduction
+        self.rho = rho
+        super().__init__(*args, **kwargs)
+        self._meta["damper"] = "pradadamp"
+        self._meta["norm2_hist"] = []
+        self._meta["loss_hist"] = []
 
+    def _step_callback(self, model):
+        with torch.no_grad():
+            grads = [x.grad.detach() for x in model.parameters()]
+            norms2 = [(g**2).sum() for g in grads]
+            norm2 = sum(norms2).item()
+        self._meta["norm2_hist"].append(norm2)
+        self._meta["loss_hist"].append(deepcopy(self._meta["batch_loss"]))
+        return {}
+
+    def damping(self) -> int:
+        if self._meta["model_updates"] == 0:
+            return self.initial_batch_size
+
+        norms2 = self._meta["norm2_hist"]
+        losses = self._meta["loss_hist"]
+        if self.reduction == "median":
+            norm2 = np.median(norms2)
+            loss = np.median(losses)
+        elif self.reduction == "mean":
+            norm2 = np.mean(norms2)
+            loss = np.mean(losses)
+        elif self.reduction == "min":
+            norm2 = np.min(norms2)
+            loss = np.min(losses)
+        elif self.reduction == "max":
+            norm2 = np.max(norms2)
+            loss = np.max(losses)
+        else:
+            raise ValueError(f"reduction={self.reduction} not recognized")
+
+        if self._meta["model_updates"] <= max(self.dwell, self.wait):
+            self._initial = (norm2, loss)
+            self.norm2 = norm2
+            self.loss = loss
+            return self.initial_batch_size
+        if not (0 <= self.rho < 1):
+            raise ValueError(f"rho={self.rho} not valid, not in 0 <= rho < 1")
+
+        norm2_0, loss_0 = self._initial
+        self.norm2 = self.rho * self.norm2 + (1 - self.rho) * norm2
+        self.loss = self.rho * self.loss + (1 - self.rho) * loss
+        self._meta["norm2_hist"] = []
+        self._meta["loss_hist"] = []
+        bs = self.initial_batch_size / (0.5 * (self.loss / loss_0 + self.norm2 / norm2_0))
+        return _ceil(max(bs, self.initial_batch_size))
 
 class GeoDamp(BaseDamper):
     def __init__(self, *args, dampingdelay=5, dampingfactor=2, **kwargs):
